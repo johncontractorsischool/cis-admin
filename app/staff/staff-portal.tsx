@@ -49,28 +49,28 @@ const metrics = [
     value: "24",
     detail: "12 awaiting shipment",
     trend: "+8%",
-    color: "#0bb39c",
+    color: "#2B90C0",
   },
   {
     label: "Student requests",
     value: "17",
     detail: "5 need attention today",
     trend: "+3",
-    color: "#ef765b",
+    color: "#FC9012",
   },
   {
     label: "Class starts",
     value: "9",
     detail: "Across 4 locations",
     trend: "This week",
-    color: "#3b7c91",
+    color: "#4B8DBC",
   },
   {
     label: "Open messages",
     value: "31",
     detail: "Average reply 18m",
     trend: "On track",
-    color: "#eebf55",
+    color: "#43B4EB",
   },
 ];
 
