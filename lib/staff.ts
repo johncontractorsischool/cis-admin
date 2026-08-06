@@ -36,7 +36,6 @@ const capabilitySets: Record<PersonaKey, StaffCapability[]> = {
     "content.manage",
     "reports.view",
     "reports.revenue.view",
-    "payroll.manage",
     "settings.manage",
     "admin-users.manage",
   ],
@@ -149,7 +148,6 @@ export const staffNavigation: NavigationGroup[] = [
     label: "Administration",
     items: [
       { label: "Reports", glyph: "10", capability: "reports.view" },
-      { label: "Payroll", glyph: "11", capability: "payroll.manage" },
       { label: "Settings", glyph: "12", capability: "settings.manage" },
       { label: "Admin Users", glyph: "13", capability: "admin-users.manage" },
     ],

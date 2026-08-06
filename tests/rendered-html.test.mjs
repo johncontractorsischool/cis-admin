@@ -49,6 +49,7 @@ test("keeps capability and mock persona policy centralized", async () => {
   assert.match(staff, /export function can/);
   assert.match(staff, /staff-restricted/);
   assert.match(staff, /shipping\.export/);
+  assert.doesNotMatch(staff, /payroll/i);
   assert.match(portal, /process\.env\.NODE_ENV !== "production"/);
   assert.match(portal, /Session credentials[\s\S]*never stored in browser storage/);
   assert.match(layout, /CIS Staff Hub/);
