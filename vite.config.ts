@@ -44,6 +44,12 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: {
+      __STAFF_FIXTURE_AUTH__: JSON.stringify(
+        process.env.NODE_ENV !== "production" &&
+          process.env.STAFF_AUTH_MODE === "fixture",
+      ),
+    },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

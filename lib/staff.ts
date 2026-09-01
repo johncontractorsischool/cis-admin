@@ -1,13 +1,5 @@
 export type StaffCapability = string;
 
-export type PersonaKey =
-  | "superadmin"
-  | "staff-standard"
-  | "staff-shipping"
-  | "translator"
-  | "instructor"
-  | "staff-restricted";
-
 export interface StaffPrincipal {
   id: number;
   username: string;
@@ -21,80 +13,40 @@ export interface StaffPrincipal {
   };
 }
 
-const capabilitySets: Record<PersonaKey, StaffCapability[]> = {
-  superadmin: [
-    "staff.access",
-    "dashboard.view",
-    "students.view",
-    "students.create",
-    "orders.view",
-    "messages.view",
-    "brochures.manage",
-    "shipping.access",
-    "shipping.export",
-    "instruction.access",
-    "content.manage",
-    "reports.view",
-    "reports.revenue.view",
-    "settings.manage",
-    "admin-users.manage",
-  ],
-  "staff-standard": [
-    "staff.access",
-    "dashboard.view",
-    "students.view",
-    "students.create",
-    "orders.view",
-    "messages.view",
-    "brochures.manage",
-  ],
-  "staff-shipping": [
-    "staff.access",
-    "dashboard.view",
-    "students.view",
-    "orders.view",
-    "messages.view",
-    "shipping.access",
-    "shipping.export",
-  ],
-  translator: [
-    "staff.access",
-    "dashboard.view",
-    "content.translate",
-  ],
-  instructor: [
-    "staff.access",
-    "dashboard.view",
-    "students.view",
-    "instruction.access",
-    "content.manage",
-  ],
-  "staff-restricted": ["staff.access", "dashboard.view"],
-};
+export interface OtpChallenge {
+  id: string;
+  maskedDestination: string;
+  expiresAt: string;
+  resendAt: string;
+  attemptsRemaining: number;
+}
 
-const personaNames: Record<PersonaKey, [string, string]> = {
-  superadmin: ["Alex Morgan", "Superadmin"],
-  "staff-standard": ["Jordan Ellis", "Staff member"],
-  "staff-shipping": ["Taylor Reed", "Shipping staff"],
-  translator: ["Cameron Vega", "Translator"],
-  instructor: ["Riley Brooks", "Instructor"],
-  "staff-restricted": ["Casey Lane", "Restricted staff"],
-};
+export type StaffAuthErrorCode =
+  | "INVALID_CREDENTIALS"
+  | "ACCOUNT_INACTIVE"
+  | "OFFSITE_DISABLED"
+  | "INVALID_OTP"
+  | "CHALLENGE_EXPIRED"
+  | "RATE_LIMITED"
+  | "SESSION_EXPIRED"
+  | "AUTH_UNAVAILABLE"
+  | "VALIDATION_ERROR";
 
-export function createPrincipal(persona: PersonaKey): StaffPrincipal {
-  const [name, staffType] = personaNames[persona];
-  return {
-    id: Object.keys(capabilitySets).indexOf(persona) + 1,
-    username: persona,
-    name,
-    email: `${persona}@example.test`,
-    staffType,
-    capabilities: capabilitySets[persona],
-    navigationBadges: {
-      questionFeedback: persona === "instructor" ? 8 : 3,
-      newSurveys: persona === "instructor" ? 5 : 1,
-    },
+export interface StaffApiErrorBody {
+  error: {
+    code: StaffAuthErrorCode;
+    message: string;
+    attemptsRemaining?: number;
   };
+}
+
+export type StaffLoginResult =
+  | { status: "authenticated"; principal: StaffPrincipal }
+  | { status: "otp_required"; challenge: OtpChallenge };
+
+export interface StaffAuthenticatedResult {
+  status: "authenticated";
+  principal: StaffPrincipal;
 }
 
 export function can(
@@ -152,13 +104,4 @@ export const staffNavigation: NavigationGroup[] = [
       { label: "Admin Users", glyph: "13", capability: "admin-users.manage" },
     ],
   },
-];
-
-export const personaOptions: Array<{ key: PersonaKey; label: string }> = [
-  { key: "superadmin", label: "Superadmin" },
-  { key: "staff-standard", label: "Standard staff" },
-  { key: "staff-shipping", label: "Shipping staff" },
-  { key: "translator", label: "Translator" },
-  { key: "instructor", label: "Instructor" },
-  { key: "staff-restricted", label: "Restricted staff" },
 ];
