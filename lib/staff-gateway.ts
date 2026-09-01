@@ -6,6 +6,11 @@ import {
   isPersonaKey,
 } from "./staff-fixtures";
 import { fixtureStudent, studentFixtures } from "./student-fixtures";
+import { customerDeviceFixtures } from "./customer-device-fixtures";
+import { newOrderFixtures, salespersonFixtures } from "./new-order-fixtures";
+import { brochureFixtures, brochureOptionsFixture, brochureTemplateFixtures } from "./brochure-fixtures";
+import type { BrochureInput, BrochureTemplateInput } from "./brochures";
+import type { NewOrderInput } from "./new-orders";
 import type { StaffApiErrorBody, StaffAuthErrorCode, StaffPrincipal } from "./staff";
 import type { StudentInput } from "./students";
 
@@ -137,6 +142,170 @@ async function handleFixtureStudents(request: Request, path: string) {
   return json({ data: null, meta: {}, message: "The requested student operation was not found." }, 404);
 }
 
+function csvValue(value: unknown) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function fixtureCustomerDeviceList(request: Request) {
+  const url = new URL(request.url);
+  const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("per_page") ?? 25)));
+  const filtered = customerDeviceFixtures.filter((device) =>
+    !search || `${device.email ?? ""} ${device.ip_address ?? ""} ${device.fingerprint ?? ""}`.toLowerCase().includes(search),
+  );
+  const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
+  return json({
+    data: { items: filtered.slice((page - 1) * perPage, page * perPage) },
+    meta: { pagination: { current_page: page, per_page: perPage, total: filtered.length, last_page: lastPage } },
+    message: "Customer devices retrieved successfully.",
+  });
+}
+
+function fixtureCustomerDeviceExport(request: Request) {
+  const url = new URL(request.url);
+  const startDate = url.searchParams.get("start_date") ?? "2026-08-01";
+  const endDate = url.searchParams.get("end_date") ?? "2026-09-01";
+  const headers = ["Customer ID", "Email", "Device Type", "IP Address", "User Agent", "Location", "Created At"];
+  const customerCounts = new Map<number, number>();
+  for (const device of customerDeviceFixtures) customerCounts.set(device.customer_id, (customerCounts.get(device.customer_id) ?? 0) + 1);
+  const eligibleCustomerIds = new Set(customerDeviceFixtures.filter((device) => {
+    const date = device.created_at?.slice(0, 10) ?? "";
+    return (customerCounts.get(device.customer_id) ?? 0) > 1 && date >= startDate && date <= endDate;
+  }).map((device) => device.customer_id));
+  const rows = customerDeviceFixtures.filter((device) => eligibleCustomerIds.has(device.customer_id));
+  const csv = [headers, ...rows.map((device) => [device.customer_id, device.email, device.device_type, device.ip_address, device.user_agent, device.location, device.created_at])]
+    .map((row) => row.map(csvValue).join(","))
+    .join("\n");
+  return new Response(csv, {
+    status: 200,
+    headers: {
+      ...NO_STORE_HEADERS,
+      "content-type": "text/csv; charset=UTF-8",
+      "content-disposition": `attachment; filename="customer_devices_from_${startDate}-to-${endDate}.csv"`,
+    },
+  });
+}
+
+function handleFixtureCustomerDevices(request: Request, path: string) {
+  if (path === "/customer-devices/export-customer-devices" && request.method === "GET") return fixtureCustomerDeviceExport(request);
+  if (path === "/customer-devices" && request.method === "GET") return fixtureCustomerDeviceList(request);
+  const deleteMatch = path.match(/^\/customer-devices\/(\d+)$/);
+  if (deleteMatch && request.method === "DELETE") {
+    return json({ data: { id: Number(deleteMatch[1]) }, meta: {}, message: "Customer device deleted successfully." });
+  }
+  return json({ data: null, meta: {}, message: "The requested customer device operation was not found." }, 404);
+}
+
+function fixtureNewOrderList(request: Request) {
+  const url = new URL(request.url);
+  const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("per_page") ?? 50)));
+  const filtered = newOrderFixtures.filter((order) =>
+    !search || `${order.id} ${order.First_name} ${order.Last_name} ${order.cust_email} ${order.phone ?? ""}`.toLowerCase().includes(search),
+  );
+  const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
+  return json({
+    data: { items: filtered.slice((page - 1) * perPage, page * perPage) },
+    meta: { pagination: { current_page: page, per_page: perPage, total: filtered.length, last_page: lastPage } },
+    message: "New orders retrieved successfully.",
+  });
+}
+
+async function handleFixtureNewOrders(request: Request, path: string) {
+  if ((path === "/new_order" || path === "/new_order/ajax_new_order") && request.method === "GET") return fixtureNewOrderList(request);
+  if (path === "/new_order/shipped_selected" && request.method === "POST") {
+    const input = (await request.json()) as { ids?: number[] };
+    const ids = Array.isArray(input.ids) ? input.ids.map(Number) : [];
+    return json({ data: { ids, updated: ids.length }, meta: {}, message: "Selected orders marked as shipped." });
+  }
+  const shippedMatch = path.match(/^\/new_order\/shipped\/(\d+)$/);
+  if (shippedMatch && request.method === "POST") return json({ data: { id: Number(shippedMatch[1]), shipped: true }, meta: {}, message: "Order marked as shipped." });
+  const orderMatch = path.match(/^\/new_order\/(\d+)$/);
+  if (orderMatch) {
+    const order = newOrderFixtures.find((entry) => entry.id === Number(orderMatch[1]));
+    if (!order) return json({ data: null, meta: {}, message: "Order not found." }, 404);
+    if (request.method === "GET") return json({ data: { order, salespeople: salespersonFixtures }, meta: {}, message: "Order retrieved successfully." });
+    if (request.method === "PATCH" || request.method === "PUT") {
+      const input = (await request.json()) as NewOrderInput;
+      const salesperson = salespersonFixtures.find((person) => person.id === input.admin_id);
+      const updated = { ...order, First_name: input.first_name, Last_name: input.last_name, cust_email: input.email, phone: input.phone, phone_extension: input.phone_extension, company: input.company, non_sale: input.non_sale, admin_id: input.admin_id, admin: salesperson?.name ?? "", salesperson: salesperson?.name ?? "", shipping: { address1: input.address1, address2: input.address2, city: input.city, state: input.state, zip: input.zip }, shipping_address: [input.address1, input.address2, input.city, input.state, input.zip].join("#php#") };
+      return json({ data: updated, meta: {}, message: "Order updated successfully." });
+    }
+  }
+  return json({ data: null, meta: {}, message: "The requested new-order operation was not found." }, 404);
+}
+
+function fixtureBrochureList(request: Request) {
+  const url = new URL(request.url);
+  const type = url.searchParams.get("type") ?? "all";
+  const status = url.searchParams.get("status") ?? "active";
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("per_page") ?? 25)));
+  const search = (url.searchParams.get("search") ?? "").toLowerCase();
+  const filtered = brochureFixtures.filter((item) => {
+    const active = status === "all" || item.is_active === (status === "active");
+    const queue = type === "new" ? !item.letter_date : type === "today" ? toFixtureIso(item.followup_date) === (url.searchParams.get("followup_date") ?? "2026-09-01") : true;
+    const keyword = !search || `${item.id} ${item.full_name} ${item.email} ${item.phone ?? ""}`.toLowerCase().includes(search);
+    const fields = [
+      ["First_Name", item.first_name], ["Last_Name", item.last_name], ["Phone", item.phone], ["Email", item.email],
+    ].every(([key, value]) => !url.searchParams.get(key as string) || String(value ?? "").toLowerCase().includes(String(url.searchParams.get(key as string)).toLowerCase()));
+    const admin = !url.searchParams.get("admin_id") || item.admin_id === Number(url.searchParams.get("admin_id"));
+    const followup = !url.searchParams.get("followup_date") || toFixtureIso(item.followup_date) === url.searchParams.get("followup_date");
+    const letter = !url.searchParams.get("letter_date") || toFixtureIso(item.letter_date) === url.searchParams.get("letter_date");
+    return active && queue && keyword && fields && admin && followup && letter;
+  });
+  const lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
+  return json({ data: { items: filtered.slice((page - 1) * perPage, page * perPage) }, meta: { pagination: { current_page: page, per_page: perPage, total: filtered.length, last_page: lastPage } }, message: "Brochures retrieved." });
+}
+
+function toFixtureIso(value: string | null) {
+  if (!value) return "";
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return match ? `${match[3]}-${match[1].padStart(2, "0")}-${match[2].padStart(2, "0")}` : value;
+}
+
+function fixtureBrochureFromInput(input: BrochureInput, id: number, current = brochureFixtures[0]) {
+  const admin = brochureOptionsFixture.admins.find((option) => option.id === input.admin_id);
+  return { ...current, id, first_name: input.First_Name, last_name: input.Last_Name, full_name: `${input.First_Name} ${input.Last_Name}`.trim(), address: input.Address ?? "", city: input.City ?? "", state: input.State ?? "", zip: input.Zip ?? "", email: input.Email, phone: input.Phone ?? "", phone_extension: input.phone_extension ?? null, notes: input.Notes ?? current.notes, memo: input.memo ?? "", ad: input.Ad ?? "", ad_other: input.ad_other ?? "", classification: input.Classification ?? "", do_not_mail: Boolean(input.do_not_mail), orig_date: input.Orig_Date ?? current.orig_date, followup_date: input.Followup_date ?? "", letter_date: input.letter_date ?? "", admin_id: input.admin_id ?? 1, admin: admin?.name ?? "Alex Morgan", language: input.language ?? "en", is_active: true };
+}
+
+function fixtureBrochureCsv() {
+  const rows = brochureFixtures.map((item) => [item.first_name, item.last_name, item.address, item.city, item.state, item.zip]);
+  const csv = [["First_Name", "Last_Name", "Address", "City", "State", "Zip"], ...rows].map((row) => row.map(csvValue).join(",")).join("\n");
+  return new Response(csv, { status: 200, headers: { ...NO_STORE_HEADERS, "content-type": "text/csv; charset=UTF-8", "content-disposition": 'attachment; filename="brochures.csv"' } });
+}
+
+async function handleFixtureBrochures(request: Request, path: string) {
+  if (path === "/brochures/export" && request.method === "GET") return fixtureBrochureCsv();
+  if (path === "/brochures/create" && request.method === "GET") return json({ data: brochureOptionsFixture, meta: {}, message: "Brochure options retrieved." });
+  if ((path === "/brochures" || path === "/brochures/ajax_users") && request.method === "GET") return fixtureBrochureList(request);
+  if (path === "/brochures" && request.method === "POST") return json({ data: fixtureBrochureFromInput(await request.json() as BrochureInput, 8813), meta: {}, message: "Brochure created." }, 201);
+  if (path === "/brochures/move_selected_callbacks" && request.method === "POST") { const input = await request.json() as { selected?: number[] }; return json({ data: { updated: input.selected?.length ?? 0 }, meta: {}, message: "Selected brochure callbacks moved." }); }
+  const statusMatch = path.match(/^\/brochures\/(\d+)\/status$/);
+  if (statusMatch && request.method === "PUT") { const record = brochureFixtures.find((item) => item.id === Number(statusMatch[1])); return record ? json({ data: { ...record, is_active: !record.is_active }, meta: {}, message: "Brochure status updated." }) : json({ data: null, meta: {}, message: "Brochure not found." }, 404); }
+  const editMatch = path.match(/^\/brochures\/(\d+)\/edit$/);
+  if (editMatch && request.method === "GET") { const record = brochureFixtures.find((item) => item.id === Number(editMatch[1])); return record ? json({ data: { brochure: record, options: brochureOptionsFixture }, meta: {}, message: "Brochure edit options retrieved." }) : json({ data: null, meta: {}, message: "Brochure not found." }, 404); }
+  const sendMatch = path.match(/^\/brochures\/(\d+)\/send_email$/);
+  if (sendMatch && request.method === "POST") return json({ data: { history_id: 401, brochure_id: Number(sendMatch[1]) }, meta: {}, message: "Brochure email sent." });
+  const recordMatch = path.match(/^\/brochures\/(\d+)$/);
+  if (recordMatch) { const record = brochureFixtures.find((item) => item.id === Number(recordMatch[1])); if (!record) return json({ data: null, meta: {}, message: "Brochure not found." }, 404); if (request.method === "GET") return json({ data: record, meta: {}, message: "Brochure retrieved." }); if (request.method === "PATCH" || request.method === "PUT") return json({ data: fixtureBrochureFromInput(await request.json() as BrochureInput, record.id, record), meta: {}, message: "Brochure updated." }); }
+
+  if (path === "/brochure_email_templates" && request.method === "GET") return json({ data: { items: brochureTemplateFixtures }, meta: { pagination: { current_page: 1, per_page: 25, total: brochureTemplateFixtures.length, last_page: 1 } }, message: "Brochure email templates retrieved." });
+  if (path === "/brochure_email_templates" && request.method === "POST") { const input = await request.json() as BrochureTemplateInput; return json({ data: { id: 53, admin_id: 1, ...input, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, meta: {}, message: "Brochure email template created." }, 201); }
+  const templateMatch = path.match(/^\/brochure_email_templates\/(\d+)$/);
+  if (templateMatch) { const template = brochureTemplateFixtures.find((item) => item.id === Number(templateMatch[1])); if (!template) return json({ data: null, meta: {}, message: "Brochure email template not found." }, 404); if (request.method === "DELETE") return json({ data: null, meta: {}, message: "Brochure email template deleted." }); if (request.method === "PATCH" || request.method === "PUT") return json({ data: { ...template, ...(await request.json() as BrochureTemplateInput) }, meta: {}, message: "Brochure email template updated." }); }
+  const resolvedMatch = path.match(/^\/brochure_email_template\/(\d+)\/(\d+)$/);
+  if (resolvedMatch && request.method === "GET") { const template = brochureTemplateFixtures.find((item) => item.id === Number(resolvedMatch[1])); const brochure = brochureFixtures.find((item) => item.id === Number(resolvedMatch[2])); if (!template || !brochure) return json({ data: null, meta: {}, message: "Template not found." }, 404); const replace = (value: string) => value.replaceAll("{firstname}", brochure.first_name).replaceAll("{lastname}", brochure.last_name).replaceAll("{classification}", brochure.classification ?? ""); return json({ data: { ...template, subject: replace(template.subject), content: replace(template.content) }, meta: {}, message: "Brochure email template retrieved." }); }
+  const testMatch = path.match(/^\/brochure_email_template\/(\d+)\/test_email$/);
+  if (testMatch && request.method === "POST") { const input = await request.json() as { email: string }; return json({ data: { email: input.email, template_id: Number(testMatch[1]) }, meta: {}, message: "Test email sent." }); }
+  const historyMatch = path.match(/^\/brochure\/email_history\/(\d+)$/);
+  if (historyMatch && request.method === "GET") return json({ data: { items: [{ id: 401, brochure_id: Number(historyMatch[1]), admin_id: 1, email_content: { subject: "Your brochure information", content: "Thanks for requesting a brochure.", to_email: "riley.garcia@example.test" }, admin: { id: 1, name: "Alex", last_name: "Morgan" }, created_at: "2026-09-01T17:30:00Z" }] }, meta: {}, message: "Brochure email history retrieved." });
+  return json({ data: null, meta: {}, message: "The requested brochure operation was not found." }, 404);
+}
+
 async function handleFixture(request: Request, path: string): Promise<Response> {
   if (path === "/auth/login" && request.method === "POST") {
     let body: { username?: unknown; password?: unknown };
@@ -184,6 +353,21 @@ async function handleFixture(request: Request, path: string): Promise<Response> 
     return handleFixtureStudents(request, path);
   }
 
+  if (path.startsWith("/customer-devices")) {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return handleFixtureCustomerDevices(request, path);
+  }
+
+  if (path.startsWith("/new_order")) {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return handleFixtureNewOrders(request, path);
+  }
+
+  if (path.startsWith("/brochures") || path.startsWith("/brochure_email") || path.startsWith("/brochure/email_history")) {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return handleFixtureBrochures(request, path);
+  }
+
   return error(404, "VALIDATION_ERROR", "The requested staff operation was not found.");
 }
 
@@ -203,7 +387,7 @@ function upstreamOrigin() {
 function capabilityList(staff: Record<string, unknown>) {
   const permissions = (staff.permissions ?? {}) as Record<string, unknown>;
   const type = typeof staff.type === "string" ? staff.type : "staff";
-  const capabilities = new Set(["staff.access", "dashboard.view", "students.view", "orders.view", "messages.view", "brochures.manage"]);
+  const capabilities = new Set(["staff.access", "dashboard.view", "students.view", "customer-devices.view", "orders.view", "messages.view", "brochures.manage"]);
   if (permissions.shipping_access) capabilities.add("shipping.access");
   if (permissions.instructor) capabilities.add("instruction.access");
   if (permissions.online_courses) capabilities.add("content.manage");
@@ -213,7 +397,9 @@ function capabilityList(staff: Record<string, unknown>) {
     capabilities.add("reports.view");
     capabilities.add("settings.manage");
     capabilities.add("admin-users.manage");
+    capabilities.add("customer-devices.delete");
   }
+  if (type === "superadmin" || permissions.shipping_access || (!permissions.translator && !permissions.instructor)) capabilities.add("new-orders.view");
   return [...capabilities];
 }
 

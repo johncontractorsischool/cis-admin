@@ -23,10 +23,14 @@ import {
   type StaffPrincipal,
 } from "../../lib/staff";
 import type { StaffSessionBootstrap } from "../../lib/staff-session";
+import type { BrochureView } from "../../lib/brochures";
+import { brochureLinks, BrochureWorkspace } from "./brochure-workspace";
+import { CustomerDevicesWorkspace } from "./customer-devices-workspace";
+import { NewOrderWorkspace } from "./new-order-workspace";
 import { StudentCreate, StudentDetails, StudentDirectory } from "./student-workspace";
 
 type AuthView = "credentials" | "otp" | "authenticated";
-export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new";
+export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new" | "customer-devices" | "new-order" | "brochures";
 type FixtureScenario = { label: string; username: string };
 type FixturePersona = { key: string; label: string };
 
@@ -394,6 +398,8 @@ function DemoShell({
   fixtureMode,
   initialPage,
   studentId,
+  brochureView,
+  brochureId,
   notice,
   onLogout,
   onPersonaChange,
@@ -404,12 +410,16 @@ function DemoShell({
   fixtureMode: boolean;
   initialPage: StaffPortalPage;
   studentId?: number;
+  brochureView?: BrochureView;
+  brochureId?: number;
   notice: string;
   onLogout: () => void;
   onPersonaChange: (persona: string) => void;
   onSessionExpired: () => void;
 }) {
-  const [activePage, setActivePage] = useState(initialPage === "dashboard" ? "Dashboard" : "Students");
+  const [activePage, setActivePage] = useState(
+    initialPage === "dashboard" ? "Dashboard" : initialPage === "customer-devices" ? "Customer Devices" : initialPage === "new-order" ? "New Orders" : initialPage === "brochures" ? "Brochures" : "Students",
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
@@ -436,12 +446,16 @@ function DemoShell({
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="sidebar-head"><Brand /></div>
         <nav className="sidebar-nav" aria-label="Staff navigation">
-          {visibleNavigation.map((group) => <div key={group.label}><p className="nav-label">{group.label}</p><ul className="nav-list">{group.items.map((item) => { const badge = item.badge ? principal.navigationBadges?.[item.badge] : undefined; const href = item.label === "Dashboard" ? "/staff" : item.label === "Students" ? "/staff/students" : null; return <li key={item.label}>{href ? <Link className={`nav-button ${activePage === item.label ? "active" : ""}`} href={href} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{badge ? <span className="nav-badge">{badge}</span> : null}</Link> : <button className={`nav-button ${activePage === item.label ? "active" : ""}`} type="button" onClick={() => navigate(item.label)} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{badge ? <span className="nav-badge">{badge}</span> : null}</button>}</li>; })}</ul></div>)}
+          {visibleNavigation.map((group) => <div key={group.label}><p className="nav-label">{group.label}</p><ul className="nav-list">{group.items.map((item) => {
+            const badge = item.badge ? principal.navigationBadges?.[item.badge] : undefined;
+            const href = item.label === "Dashboard" ? "/staff" : item.label === "Students" ? "/staff/students" : item.label === "Customer Devices" ? "/staff/customer-devices" : item.label === "New Orders" ? "/staff/new_order" : item.label === "Brochures" ? "/staff/brochures/new" : null;
+            return <li key={item.label}>{href ? <><Link className={`nav-button ${activePage === item.label ? "active" : ""}`} href={href} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{item.label === "Brochures" ? <span className="nav-chevron" aria-hidden="true">⌄</span> : null}{badge ? <span className="nav-badge">{badge}</span> : null}</Link>{item.label === "Brochures" && activePage === "Brochures" ? <ul className="nav-sublist">{brochureLinks.map((subitem) => <li key={subitem.view}><Link href={subitem.href} className={brochureView === subitem.view ? "active" : ""} aria-current={brochureView === subitem.view ? "page" : undefined}>{subitem.label}</Link></li>)}</ul> : null}</> : <button className={`nav-button ${activePage === item.label ? "active" : ""}`} type="button" onClick={() => navigate(item.label)} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{badge ? <span className="nav-badge">{badge}</span> : null}</button>}</li>;
+          })}</ul></div>)}
         </nav>
         <div className="sidebar-foot"><button className="profile-button" type="button" onClick={() => showToast("Profile settings await an approved API contract.")}><span className="avatar">{initials(principal.name)}</span><span className="profile-copy"><strong>{principal.name}</strong><span>{principal.staffType ?? "staff"}</span></span><span aria-hidden="true">···</span></button></div>
       </aside>
       <header className="topbar"><button className="header-icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">☰</button><button className="topbar-search" type="button" onClick={() => setSearchOpen(true)}><span aria-hidden="true">⌕</span><span>Search customers</span><kbd>⌘ K</kbd></button><div className="topbar-actions"><button className="header-icon-button" type="button" onClick={() => showToast("No new fixture updates.")} aria-label="Staff updates">◔</button><button className="header-icon-button" type="button" onClick={onLogout} aria-label="Log out" title="Log out">↪</button></div></header>
-      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
+      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? <NewOrderWorkspace /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
       {searchOpen ? <SearchModal onClose={() => setSearchOpen(false)} /> : null}
       {toast ? <div className="toast" role="status"><span className="toast-mark" aria-hidden="true">✓</span><span>{toast}</span></div> : null}
       {fixtureMode ? <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div> : null}
@@ -456,6 +470,8 @@ export function StaffPortal({
   fixturePersonas,
   initialPage = "dashboard",
   studentId,
+  brochureView,
+  brochureId,
 }: {
   initialSession: StaffSessionBootstrap;
   fixtureMode: boolean;
@@ -463,6 +479,8 @@ export function StaffPortal({
   fixturePersonas: FixturePersona[];
   initialPage?: StaffPortalPage;
   studentId?: number;
+  brochureView?: BrochureView;
+  brochureId?: number;
 }) {
   const initialPrincipal = initialSession.status === "authenticated" ? initialSession.principal : null;
   const [authView, setAuthView] = useState<AuthView>(initialPrincipal ? "authenticated" : "credentials");
@@ -508,5 +526,5 @@ export function StaffPortal({
     return <LoginScreen view={authView === "otp" ? "otp" : "credentials"} challenge={challenge} initialMessage={notice} fixtureMode={fixtureMode} fixtureScenarios={fixtureScenarios} onAuthenticated={authenticate} onOtpRequired={(nextChallenge) => { setChallenge(nextChallenge); setNotice(""); setAuthView("otp"); }} onChallengeChange={setChallenge} onBack={() => { setChallenge(null); setAuthView("credentials"); }} />;
   }
 
-  return <DemoShell principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
+  return <DemoShell principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
 }

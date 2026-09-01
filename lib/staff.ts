@@ -77,8 +77,10 @@ export const staffNavigation: NavigationGroup[] = [
     label: "Customer operations",
     items: [
       { label: "Order History", glyph: "02", capability: "orders.view" },
+      { label: "New Orders", glyph: "NO", capability: "new-orders.view" },
       { label: "Message Center", glyph: "03", capability: "messages.view" },
       { label: "Students", glyph: "04", capability: "students.view" },
+      { label: "Customer Devices", glyph: "DV", capability: "customer-devices.view" },
       { label: "Brochures", glyph: "05", capability: "brochures.manage" },
       { label: "Shipping", glyph: "06", capability: "shipping.access" },
     ],

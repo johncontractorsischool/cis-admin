@@ -1,0 +1,13 @@
+import type { NewOrderDetail, SalespersonOption } from "./new-orders";
+
+export const salespersonFixtures: SalespersonOption[] = [
+  { id: 1, name: "Alex Morgan", active: true },
+  { id: 2, name: "Jordan Ellis", active: true },
+  { id: 3, name: "Taylor Reed", active: true },
+  { id: 8, name: "Sam Patel", active: false },
+];
+export const newOrderFixtures: NewOrderDetail[] = [
+  { id: 64021, First_name: "Jamie", Last_name: "Rivera", order_date: "08/31/2026", cust_email: "jamie.rivera@example.test", phone: "+19165550100", phone_extension: "42", grand_total: 549, admin: "Jordan Ellis", admin_id: 2, salesperson: "Jordan Ellis", non_sale: false, shipped: false, ship_date: null, company: "Rivera Builders", shipping_address: "1040 Capitol Ave#php#Suite 200#php#Sacramento#php#CA#php#95814", billing_address: null, sku: "KIT-B", item_description: "B General Building study package", subtotal: 500, sales_tax: 39, shipping_type: "Ground", shipping_price: 10, orderinstructions: "Leave with reception.", shipping: { address1: "1040 Capitol Ave", address2: "Suite 200", city: "Sacramento", state: "CA", zip: "95814" }, items: [{ description: "B General Building manual", price: 249 }, { description: "Law & Business online course", price: 251 }] },
+  { id: 64020, First_name: "Morgan", Last_name: "Lee", order_date: "08/31/2026", cust_email: "morgan.lee@example.test", phone: "+15595550199", phone_extension: null, grand_total: 299, admin: "Taylor Reed", admin_id: 3, salesperson: "Taylor Reed", non_sale: false, shipped: false, ship_date: null, company: "Lee Electric", shipping_address: "88 Fulton St#php##php#Fresno#php#CA#php#93721", billing_address: null, sku: "C10-MANUAL", item_description: "C-10 Electrical manual", subtotal: 275, sales_tax: 19, shipping_type: "Priority", shipping_price: 5, orderinstructions: null, shipping: { address1: "88 Fulton St", address2: "", city: "Fresno", state: "CA", zip: "93721" }, items: [{ description: "C-10 Electrical manual", price: 275 }] },
+  { id: 64019, First_name: "Avery", Last_name: "Chen", order_date: "08/30/2026", cust_email: "avery.chen@example.test", phone: "+16195550122", phone_extension: null, grand_total: 0, admin: "Alex Morgan", admin_id: 1, salesperson: "Alex Morgan", non_sale: true, shipped: false, ship_date: null, company: "Chen Construction", shipping_address: "701 Harbor Dr#php##php#San Diego#php#CA#php#92101", billing_address: null, sku: "COMP", item_description: "Replacement workbook", subtotal: 0, sales_tax: 0, shipping_type: "Ground", shipping_price: 0, orderinstructions: "Non-sale replacement.", shipping: { address1: "701 Harbor Dr", address2: "", city: "San Diego", state: "CA", zip: "92101" }, items: [{ description: "Replacement workbook", price: 0 }] },
+];
