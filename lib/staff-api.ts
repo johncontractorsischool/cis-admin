@@ -19,7 +19,7 @@ export class StaffApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function staffRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`/api/v1/staff${path}`, {
@@ -44,7 +44,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return (await response.json()) as T;
   }
 
-  let body: StaffApiErrorBody | null = null;
+  let body: (StaffApiErrorBody & { message?: string }) | null = null;
   try {
     body = (await response.json()) as StaffApiErrorBody;
   } catch {
@@ -52,39 +52,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   throw new StaffApiError(
-    body?.error.code ?? "AUTH_UNAVAILABLE",
-    body?.error.message ??
-      "The sign-in service is temporarily unavailable. Please retry.",
+    body?.error?.code ?? (response.status === 422 ? "VALIDATION_ERROR" : "AUTH_UNAVAILABLE"),
+    body?.error?.message ??
+      body?.message ??
+      "The requested staff operation is temporarily unavailable. Please retry.",
     response.status,
     body?.error.attemptsRemaining,
   );
 }
 
 export function login(username: string, password: string) {
-  return request<StaffLoginResult>("/auth/login", {
+  return staffRequest<StaffLoginResult>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
 }
 
 export function verifyOtp(challengeId: string, code: string) {
-  return request<StaffAuthenticatedResult>(
+  return staffRequest<StaffAuthenticatedResult>(
     `/auth/challenges/${encodeURIComponent(challengeId)}/verify`,
     { method: "POST", body: JSON.stringify({ code }) },
   );
 }
 
 export function resendOtp(challengeId: string) {
-  return request<{ challenge: OtpChallenge }>(
+  return staffRequest<{ challenge: OtpChallenge }>(
     `/auth/challenges/${encodeURIComponent(challengeId)}/resend`,
     { method: "POST" },
   );
 }
 
 export function currentPrincipal() {
-  return request<StaffPrincipal>("/me");
+  return staffRequest<StaffPrincipal>("/me");
 }
 
 export function logout() {
-  return request<void>("/logout", { method: "POST" });
+  return staffRequest<void>("/logout", { method: "POST" });
 }

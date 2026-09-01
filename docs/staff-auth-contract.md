@@ -1,19 +1,23 @@
 # Staff Authentication Contract
 
-Laravel is authoritative for staff identity, session state, access policy,
-network-location policy, OTP rules, and rate limiting. The Staff Hub forwards
-these requests through the same public origin under `/api/v1/staff`.
+Laravel is authoritative for staff identity, token state, access policy,
+network-location policy, OTP rules, and rate limiting. The Staff Hub exposes a
+same-origin browser gateway under `/api/v1/staff` and translates those requests
+to the contractor-api endpoints under `/api/v2/staff`.
 
 ## Transport and security
 
-- Laravel issues an opaque session cookie with `HttpOnly`, `Secure`,
-  `SameSite=Lax`, and `Path=/`. The cookie is never exposed in JSON.
+- contractor-api issues a signed, revocable staff bearer token. The gateway
+  removes that token from the JSON response and stores it in a gateway-owned
+  cookie with `HttpOnly`, `Secure`, `SameSite=Lax`, and `Path=/`. The token is
+  never exposed to browser JavaScript or browser storage.
 - Authentication responses include `Cache-Control: no-store, max-age=0` and
   `Pragma: no-cache`.
 - Laravel validates the forwarded browser `Origin` before state-changing
   requests and rejects unexpected origins.
-- The gateway forwards `Cookie`, every `Set-Cookie` header, `Origin`,
-  `X-Forwarded-Host`, `X-Forwarded-Proto`, and the trusted client address.
+- The gateway forwards the staff token only in the server-to-server
+  `Authorization` header, plus `Origin`, `X-Forwarded-Host`,
+  `X-Forwarded-Proto`, and the trusted client address.
 - Passwords and OTP values must not be logged by either service.
 
 ## Shared representations
@@ -59,6 +63,8 @@ interface ErrorResponse {
 ```
 
 Capabilities shape frontend navigation but never replace backend authorization.
+The gateway derives those navigation capabilities from contractor-api's safe
+staff profile and permissions object.
 
 ## Endpoints
 
@@ -103,6 +109,15 @@ returns `401 SESSION_EXPIRED`.
 
 Revokes the server session, expires the cookie, and returns `204` with no body.
 Calling logout for an already-expired session may also return `204`.
+
+## Upstream translation
+
+The gateway maps login to `POST /api/v2/staff/auth/login`, challenge verification
+to `POST /api/v2/staff/auth/otp`, challenge resend to
+`POST /api/v2/staff/auth/otp/resend`, identity restore to
+`GET /api/v2/staff/auth/me`, and logout to `POST /api/v2/staff/auth/logout`.
+All protected student calls are forwarded to `/api/v2/staff/students...` with
+the server-held bearer token.
 
 ## Deployment acceptance
 

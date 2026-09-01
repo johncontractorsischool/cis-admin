@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type FormEvent,
 } from "react";
+import Link from "next/link";
 import {
   login,
   logout,
@@ -22,8 +23,10 @@ import {
   type StaffPrincipal,
 } from "../../lib/staff";
 import type { StaffSessionBootstrap } from "../../lib/staff-session";
+import { StudentCreate, StudentDetails, StudentDirectory } from "./student-workspace";
 
 type AuthView = "credentials" | "otp" | "authenticated";
+export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new";
 type FixtureScenario = { label: string; username: string };
 type FixturePersona = { key: string; label: string };
 
@@ -388,6 +391,9 @@ function ForbiddenPage({ onBack }: { onBack: () => void }) {
 function DemoShell({
   principal,
   fixturePersonas,
+  fixtureMode,
+  initialPage,
+  studentId,
   notice,
   onLogout,
   onPersonaChange,
@@ -395,12 +401,15 @@ function DemoShell({
 }: {
   principal: StaffPrincipal;
   fixturePersonas: FixturePersona[];
+  fixtureMode: boolean;
+  initialPage: StaffPortalPage;
+  studentId?: number;
   notice: string;
   onLogout: () => void;
   onPersonaChange: (persona: string) => void;
   onSessionExpired: () => void;
 }) {
-  const [activePage, setActivePage] = useState("Dashboard");
+  const [activePage, setActivePage] = useState(initialPage === "dashboard" ? "Dashboard" : "Students");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
@@ -427,34 +436,15 @@ function DemoShell({
       <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
         <div className="sidebar-head"><Brand /></div>
         <nav className="sidebar-nav" aria-label="Staff navigation">
-          {visibleNavigation.map((group) => <div key={group.label}><p className="nav-label">{group.label}</p><ul className="nav-list">{group.items.map((item) => { const badge = item.badge ? principal.navigationBadges?.[item.badge] : undefined; return <li key={item.label}><button className={`nav-button ${activePage === item.label ? "active" : ""}`} type="button" onClick={() => navigate(item.label)} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{badge ? <span className="nav-badge">{badge}</span> : null}</button></li>; })}</ul></div>)}
+          {visibleNavigation.map((group) => <div key={group.label}><p className="nav-label">{group.label}</p><ul className="nav-list">{group.items.map((item) => { const badge = item.badge ? principal.navigationBadges?.[item.badge] : undefined; const href = item.label === "Dashboard" ? "/staff" : item.label === "Students" ? "/staff/students" : null; return <li key={item.label}>{href ? <Link className={`nav-button ${activePage === item.label ? "active" : ""}`} href={href} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{badge ? <span className="nav-badge">{badge}</span> : null}</Link> : <button className={`nav-button ${activePage === item.label ? "active" : ""}`} type="button" onClick={() => navigate(item.label)} aria-current={activePage === item.label ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{item.glyph}</span><span>{item.label}</span>{badge ? <span className="nav-badge">{badge}</span> : null}</button>}</li>; })}</ul></div>)}
         </nav>
         <div className="sidebar-foot"><button className="profile-button" type="button" onClick={() => showToast("Profile settings await an approved API contract.")}><span className="avatar">{initials(principal.name)}</span><span className="profile-copy"><strong>{principal.name}</strong><span>{principal.staffType ?? "staff"}</span></span><span aria-hidden="true">···</span></button></div>
       </aside>
       <header className="topbar"><button className="header-icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">☰</button><button className="topbar-search" type="button" onClick={() => setSearchOpen(true)}><span aria-hidden="true">⌕</span><span>Search customers</span><kbd>⌘ K</kbd></button><div className="topbar-actions"><button className="header-icon-button" type="button" onClick={() => showToast("No new fixture updates.")} aria-label="Staff updates">◔</button><button className="header-icon-button" type="button" onClick={onLogout} aria-label="Log out" title="Log out">↪</button></div></header>
-      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
+      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
       {searchOpen ? <SearchModal onClose={() => setSearchOpen(false)} /> : null}
       {toast ? <div className="toast" role="status"><span className="toast-mark" aria-hidden="true">✓</span><span>{toast}</span></div> : null}
-      <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div>
-    </main>
-  );
-}
-
-function FoundationShell({ principal, notice, onLogout }: { principal: StaffPrincipal; notice: string; onLogout: () => void }) {
-  const firstName = principal.name.split(" ")[0];
-  return (
-    <main className="foundation-shell">
-      <header className="foundation-topbar"><Brand /><div className="foundation-account"><span className="avatar">{initials(principal.name)}</span><span className="profile-copy"><strong>{principal.name}</strong><span>{principal.staffType ?? "Staff"}</span></span><button className="secondary-button" type="button" onClick={onLogout}>Log out</button></div></header>
-      <section className="foundation-content">
-        {notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}
-        <div className="foundation-status">
-          <span className="foundation-check" aria-hidden="true">✓</span>
-          <p className="eyebrow">Secure access verified</p>
-          <h1>Welcome, {firstName}.</h1>
-          <p>Your staff identity and access profile are synchronized with Contractor Institute. Operational modules will appear here as their API-backed workflows are approved.</p>
-          <dl className="access-summary"><div><dt>Account</dt><dd>{principal.email}</dd></div><div><dt>Role</dt><dd>{principal.staffType ?? "Staff"}</dd></div><div><dt>Access profile</dt><dd>{principal.capabilities.length} enabled capabilities</dd></div></dl>
-        </div>
-      </section>
+      {fixtureMode ? <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div> : null}
     </main>
   );
 }
@@ -464,11 +454,15 @@ export function StaffPortal({
   fixtureMode,
   fixtureScenarios,
   fixturePersonas,
+  initialPage = "dashboard",
+  studentId,
 }: {
   initialSession: StaffSessionBootstrap;
   fixtureMode: boolean;
   fixtureScenarios: FixtureScenario[];
   fixturePersonas: FixturePersona[];
+  initialPage?: StaffPortalPage;
+  studentId?: number;
 }) {
   const initialPrincipal = initialSession.status === "authenticated" ? initialSession.principal : null;
   const [authView, setAuthView] = useState<AuthView>(initialPrincipal ? "authenticated" : "credentials");
@@ -514,9 +508,5 @@ export function StaffPortal({
     return <LoginScreen view={authView === "otp" ? "otp" : "credentials"} challenge={challenge} initialMessage={notice} fixtureMode={fixtureMode} fixtureScenarios={fixtureScenarios} onAuthenticated={authenticate} onOtpRequired={(nextChallenge) => { setChallenge(nextChallenge); setNotice(""); setAuthView("otp"); }} onChallengeChange={setChallenge} onBack={() => { setChallenge(null); setAuthView("credentials"); }} />;
   }
 
-  if (fixtureMode) {
-    return <DemoShell principal={principal} fixturePersonas={fixturePersonas} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
-  }
-
-  return <FoundationShell principal={principal} notice={notice} onLogout={() => void signOut()} />;
+  return <DemoShell principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
 }

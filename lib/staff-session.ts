@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import type { StaffPrincipal } from "./staff";
+import { principalFromUpstream } from "./staff-gateway";
 import {
   createFixturePrincipal,
   fixturePersonaOptions,
@@ -24,17 +25,13 @@ function fixturePersonaFromCookie(cookie: string | null) {
   return isPersonaKey(decoded) ? decoded : null;
 }
 
-function isPrincipal(value: unknown): value is StaffPrincipal {
-  if (!value || typeof value !== "object") return false;
-  const principal = value as Partial<StaffPrincipal>;
-  return (
-    typeof principal.id === "number" &&
-    typeof principal.username === "string" &&
-    typeof principal.name === "string" &&
-    typeof principal.email === "string" &&
-    Array.isArray(principal.capabilities) &&
-    principal.capabilities.every((capability) => typeof capability === "string")
-  );
+function cookieValue(cookie: string | null, name: string) {
+  const value = (cookie ?? "")
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+  return value ? decodeURIComponent(value) : null;
 }
 
 export async function loadStaffSession(): Promise<{
@@ -72,7 +69,7 @@ export async function loadStaffSession(): Promise<{
 
   let endpoint: URL;
   try {
-    endpoint = new URL("/api/v1/staff/me", configured);
+    endpoint = new URL("/api/v2/staff/auth/me", configured);
     const localHostnames = new Set(["localhost", "127.0.0.1", "[::1]"]);
     if (endpoint.protocol !== "https:" && !localHostnames.has(endpoint.hostname)) throw new Error();
   } catch {
@@ -88,10 +85,19 @@ export async function loadStaffSession(): Promise<{
   }
 
   try {
+    const token = cookieValue(requestHeaders.get("cookie"), "cis_staff_token");
+    if (!token) {
+      return {
+        bootstrap: { status: "anonymous" },
+        fixtureMode: false,
+        fixtureScenarios: [],
+        fixturePersonas: [],
+      };
+    }
     const response = await fetch(endpoint, {
       headers: {
         accept: "application/json",
-        cookie: requestHeaders.get("cookie") ?? "",
+        authorization: `Bearer ${token}`,
         origin:
           requestHeaders.get("origin") ??
           `${requestHeaders.get("x-forwarded-proto") ?? "https"}://${requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost"}`,
@@ -107,8 +113,9 @@ export async function loadStaffSession(): Promise<{
       };
     }
     if (!response.ok) throw new Error();
-    const principal: unknown = await response.json();
-    if (!isPrincipal(principal)) throw new Error();
+    const payload = (await response.json()) as { data?: unknown };
+    const principal = principalFromUpstream(payload.data);
+    if (!principal) throw new Error();
     return {
       bootstrap: { status: "authenticated", principal },
       fixtureMode: false,
