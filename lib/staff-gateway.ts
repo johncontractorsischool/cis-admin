@@ -341,7 +341,74 @@ function fixtureGlobalSearch(request: Request) {
 function fixtureOrderRecord(id: number) {
   const order = newOrderFixtures.find((entry) => entry.id === id);
   if (!order) return json({ data: null, meta: {}, message: "Order not found." }, 404);
-  return json({ data: { id: order.id, order_number: String(order.id), customer_name: `${order.First_name} ${order.Last_name}`, email: order.cust_email, phone: order.phone ?? "", company: order.company ?? "", sku: order.sku ?? "", classification: "", salesperson: order.salesperson ?? "", order_date: order.order_date ?? "", ship_date: order.ship_date ?? "", tracking_number: "", shipping_type: order.shipping_type ?? "", subtotal: order.subtotal, shipping_price: order.shipping_price, sales_tax: order.sales_tax, grand_total: order.grand_total, item_description: order.item_description ?? "", instructions: order.orderinstructions ?? "", shipped: Boolean(order.shipped) }, meta: {}, message: "Order retrieved successfully." });
+  return json({ data: { id: order.id, order_number: String(order.id), customer_name: `${order.First_name} ${order.Last_name}`, email: order.cust_email, phone: order.phone ?? "", company: order.company ?? "", sku: order.sku ?? "", classification: order.classification ?? "", salesperson: order.salesperson ?? "", order_date: order.order_date ?? "", ship_date: order.ship_date ?? "", tracking_number: "", shipping_type: order.shipping_type ?? "", subtotal: order.subtotal, shipping_price: order.shipping_price, sales_tax: order.sales_tax, grand_total: order.grand_total, item_description: order.item_description ?? "", instructions: order.orderinstructions ?? "", shipped: Boolean(order.shipped) }, meta: {}, message: "Order retrieved successfully." });
+}
+
+const fixtureEnrollmentQuotes = new Map<string, {
+  customerId: number;
+  sku: string;
+  classification: string;
+  productName: string;
+  shippingMethod: string;
+  subtotal: string;
+  tax: string;
+  shipping: string;
+  total: string;
+}>();
+const fixtureEnrollmentOrders = new Map<string, Record<string, unknown>>();
+
+function fixtureEnrollmentOptions(customerId: number) {
+  const customer = studentFixtures.find((student) => student.customerid === customerId);
+  if (!customer) return error(404, "CUSTOMER_NOT_FOUND", "Customer not found.");
+  return json({ data: {
+    customer: { id: customer.customerid, first_name: customer.name, last_name: customer.lname ?? "", email: customer.email, phone: customer.mobilenum ?? "", company: "", address: { line1: customer.address ?? "", line2: "", city: customer.city ?? "", state: customer.state ?? "", zip: customer.zip ?? "" } },
+    products: [
+      { sku: "KIT-B", name: "B General Building study package", price: "500.00", requires_shipping: true, popular: true },
+      { sku: "ONLINE-LAW", name: "Law online course", price: "295.00", requires_shipping: false, popular: false },
+    ],
+    classifications: [{ id: 44, code: "B", name: "General Building Contractor" }, { id: 59, code: "C-10", name: "Electrical Contractor" }],
+    shipping_methods: [{ id: "none", label: "No shipping", price: "0.00" }, { id: "ground", label: "UPS Ground", price: "16.85" }, { id: "two_day", label: "UPS Two Day", price: "38.50" }, { id: "next_day", label: "UPS Next Day", price: "54.50" }],
+    payment_methods: [{ id: "card", label: "Credit card", enabled: false }, { id: "check", label: "Check", enabled: true }, { id: "cash", label: "Cash", enabled: true }],
+    card_tokenization: { enabled: false, login_id: null, client_key: null, script_url: null },
+    maximum_discount_percent: 100,
+  }, meta: {}, message: "Staff enrollment options retrieved successfully." });
+}
+
+async function handleFixtureEnrollment(request: Request, path: string) {
+  if (path === "/enrollments/options" && request.method === "GET") return fixtureEnrollmentOptions(Number(new URL(request.url).searchParams.get("customer_id")));
+  if (path === "/enrollments/quote" && request.method === "POST") {
+    const input = await request.json() as { customer_id: number; sku: string; classification_id: number; shipping_method: string; discount?: { type?: string; value?: number; reason?: string } };
+    const product = input.sku === "ONLINE-LAW" ? { price: 295, shipping: false, name: "Law online course" } : input.sku === "KIT-B" ? { price: 500, shipping: true, name: "B General Building study package" } : null;
+    if (!product) return error(422, "SKU_UNAVAILABLE", "The selected SKU is unavailable for staff ordering.");
+    if (product.shipping && input.shipping_method === "none") return error(422, "SHIPPING_REQUIRED", "Select a shipping method for this product.");
+    const type = input.discount?.type ?? "none";
+    if (type !== "none" && (input.discount?.reason?.trim().length ?? 0) < 5) return error(422, "DISCOUNT_REASON_REQUIRED", "Enter a reason for the discount.");
+    const discount = type === "percent" ? product.price * Math.min(100, Number(input.discount?.value ?? 0)) / 100 : type === "fixed" ? Math.min(product.price, Number(input.discount?.value ?? 0)) : 0;
+    const subtotal = product.price - discount;
+    const tax = product.shipping ? 40 * (subtotal / product.price) : 0;
+    const shippingPrices: Record<string, number> = { none: 0, ground: 16.85, two_day: 38.5, next_day: 54.5 };
+    const shipping = product.shipping ? shippingPrices[input.shipping_method] ?? 0 : 0;
+    const total = subtotal + tax + shipping;
+    const id = crypto.randomUUID();
+    const classification = input.classification_id === 59 ? "C-10" : "B";
+    fixtureEnrollmentQuotes.set(id, { customerId: input.customer_id, sku: input.sku, classification, productName: product.name, shippingMethod: product.shipping ? input.shipping_method : "none", subtotal: subtotal.toFixed(2), tax: tax.toFixed(2), shipping: shipping.toFixed(2), total: total.toFixed(2) });
+    return json({ data: { id, sku: input.sku, product_name: product.name, classification_id: input.classification_id, classification, shipping_method: product.shipping ? input.shipping_method : "none", requires_shipping: product.shipping, items: [{ description: product.name, price_cents: product.price * 100, price: product.price.toFixed(2) }], amounts: { list_subtotal: product.price.toFixed(2), discount: discount.toFixed(2), subtotal: subtotal.toFixed(2), tax: tax.toFixed(2), shipping: shipping.toFixed(2), total: total.toFixed(2), total_cents: Math.round(total * 100) }, discount: { type, reason: input.discount?.reason ?? null }, expires_at: new Date(Date.now() + 15 * 60_000).toISOString() }, meta: {}, message: "Staff enrollment quote created successfully." }, 201);
+  }
+  if (path === "/enrollments/orders" && request.method === "POST") {
+    const input = await request.json() as { quote_id: string; idempotency_key: string; payment?: { method?: string }; billing?: { company?: string }; shipping?: { line1?: string; line2?: string; city?: string; state?: string; zip?: string }; order_instructions?: string };
+    const replay = fixtureEnrollmentOrders.get(input.idempotency_key);
+    if (replay) return json({ data: { ...replay, idempotent_replay: true }, meta: {}, message: "Enrollment order created successfully." }, 201);
+    const quote = fixtureEnrollmentQuotes.get(input.quote_id);
+    if (!quote) return error(409, "QUOTE_EXPIRED", "This quote has expired. Recalculate the order before submitting payment.");
+    if (input.payment?.method === "card") return error(503, "PAYMENT_UNAVAILABLE", "Card processing is not configured in fixture mode.");
+    fixtureEnrollmentQuotes.delete(input.quote_id);
+    const customer = studentFixtures.find((student) => student.customerid === quote.customerId)!;
+    if (!newOrderFixtures.some((order) => order.id === 64099)) newOrderFixtures.unshift({ id: 64099, First_name: customer.name, Last_name: customer.lname ?? "", order_date: "09/02/2026", cust_email: customer.email, phone: customer.mobilenum ?? "", phone_extension: null, grand_total: Number(quote.total), admin: "Alex Morgan", admin_id: 1, salesperson: "Alex Morgan", non_sale: false, shipped: false, ship_date: null, company: input.billing?.company ?? "", shipping_address: [input.shipping?.line1, input.shipping?.line2, input.shipping?.city, input.shipping?.state, input.shipping?.zip].join("#php#"), billing_address: null, sku: quote.sku, classification: quote.classification, item_description: quote.productName, subtotal: Number(quote.subtotal), sales_tax: Number(quote.tax), shipping_type: quote.shippingMethod === "ground" ? "UPS Ground" : quote.shippingMethod === "two_day" ? "UPS Two Day" : quote.shippingMethod === "next_day" ? "UPS Next Day" : "No shipping", shipping_price: Number(quote.shipping), orderinstructions: input.order_instructions ?? null, shipping: { address1: input.shipping?.line1 ?? "", address2: input.shipping?.line2 ?? "", city: input.shipping?.city ?? "", state: input.shipping?.state ?? "", zip: input.shipping?.zip ?? "" }, items: [{ description: quote.productName, price: Number(quote.subtotal) }] });
+    const result = { order_id: 64099, customer_id: quote.customerId, quote_id: input.quote_id, sku: quote.sku, classification: quote.classification, total: quote.total, payment: { method: input.payment?.method ?? "check", transaction_id: null, account_type: input.payment?.method ?? "check", account_last_four: null }, idempotent_replay: false };
+    fixtureEnrollmentOrders.set(input.idempotency_key, result);
+    return json({ data: result, meta: {}, message: "Enrollment order created successfully." }, 201);
+  }
+  return error(404, "VALIDATION_ERROR", "The requested enrollment operation was not found.");
 }
 
 async function handleFixture(request: Request, path: string): Promise<Response> {
@@ -405,6 +472,13 @@ async function handleFixture(request: Request, path: string): Promise<Response> 
       : json({ data: null, meta: {}, message: "Application not found." }, 404);
   }
 
+  if (path.startsWith("/enrollments")) {
+    const persona = readFixturePersona(request);
+    if (!persona) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    if (!createFixturePrincipal(persona).capabilities.includes("orders.create")) return error(403, "VALIDATION_ERROR", "You are not authorized to create customer orders.");
+    return handleFixtureEnrollment(request, path);
+  }
+
   if (path.startsWith("/students")) {
     if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
     return handleFixtureStudents(request, path);
@@ -455,7 +529,9 @@ function capabilityList(staff: Record<string, unknown>) {
     capabilities.add("settings.manage");
     capabilities.add("admin-users.manage");
     capabilities.add("customer-devices.delete");
+    capabilities.add("orders.create");
   }
+  if (permissions.live_pending_orders) capabilities.add("orders.create");
   if (type === "superadmin" || permissions.shipping_access || (!permissions.translator && !permissions.instructor)) capabilities.add("new-orders.view");
   return [...capabilities];
 }

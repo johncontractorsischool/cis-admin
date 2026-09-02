@@ -30,11 +30,12 @@ import type { BrochureView } from "../../lib/brochures";
 import { brochureLinks, BrochureWorkspace } from "./brochure-workspace";
 import { CustomerDevicesWorkspace } from "./customer-devices-workspace";
 import { NewOrderWorkspace } from "./new-order-workspace";
+import { EnrollmentWorkspace } from "./enrollment-workspace";
 import { ApplicationRecordWorkspace, OrderRecordWorkspace } from "./search-record-workspace";
 import { StudentCreate, StudentDetails, StudentDirectory } from "./student-workspace";
 
 type AuthView = "credentials" | "otp" | "authenticated";
-export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new" | "customer-devices" | "new-order" | "brochures" | "order-detail" | "application-detail";
+export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new" | "customer-devices" | "new-order" | "enrollment-new" | "brochures" | "order-detail" | "application-detail";
 type FixtureScenario = { label: string; username: string };
 type FixturePersona = { key: string; label: string };
 
@@ -505,6 +506,15 @@ function ForbiddenPage({ onBack }: { onBack: () => void }) {
   return <div className="forbidden-page"><div className="coming-inner"><span className="coming-glyph" aria-hidden="true">403</span><h1>Access not available</h1><p>You’re signed in, but this account doesn’t have the capability required for this page. No protected content was loaded.</p><button className="secondary-button" type="button" onClick={onBack}>Return to dashboard</button></div></div>;
 }
 
+function pageNavigationLabel(page: StaffPortalPage) {
+  if (page === "dashboard") return "Dashboard";
+  if (page === "customer-devices") return "Customer Devices";
+  if (page === "new-order" || page === "enrollment-new") return "New Orders";
+  if (page === "brochures") return "Brochures";
+  if (page === "order-detail") return "Order History";
+  return "Students";
+}
+
 function DemoShell({
   principal,
   fixturePersonas,
@@ -532,9 +542,7 @@ function DemoShell({
   onPersonaChange: (persona: string) => void;
   onSessionExpired: () => void;
 }) {
-  const [activePage, setActivePage] = useState(
-    initialPage === "dashboard" ? "Dashboard" : initialPage === "customer-devices" ? "Customer Devices" : initialPage === "new-order" ? "New Orders" : initialPage === "brochures" ? "Brochures" : initialPage === "order-detail" ? "Order History" : "Students",
-  );
+  const [activePage, setActivePage] = useState(() => pageNavigationLabel(initialPage));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
@@ -570,7 +578,7 @@ function DemoShell({
         <div className="sidebar-foot"><button className="profile-button" type="button" onClick={() => showToast("Profile settings await an approved API contract.")}><span className="avatar">{initials(principal.name)}</span><span className="profile-copy"><strong>{principal.name}</strong><span>{principal.staffType ?? "staff"}</span></span><span aria-hidden="true">···</span></button></div>
       </aside>
       <header className="topbar"><button className="header-icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">☰</button><button className="topbar-search" type="button" onClick={() => setSearchOpen(true)}><span aria-hidden="true">⌕</span><span>Search customers</span><kbd>⌘ K</kbd></button><div className="topbar-actions"><button className="header-icon-button" type="button" onClick={() => showToast("No new fixture updates.")} aria-label="Staff updates">◔</button><button className="header-icon-button" type="button" onClick={onLogout} aria-label="Log out" title="Log out">↪</button></div></header>
-      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "application-detail" && recordId ? <ApplicationRecordWorkspace recordId={recordId} /> : initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? <NewOrderWorkspace /> : activePage === "Order History" && initialPage === "order-detail" && recordId ? <OrderRecordWorkspace recordId={recordId} /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
+      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "application-detail" && recordId ? <ApplicationRecordWorkspace recordId={recordId} /> : initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? initialPage === "enrollment-new" ? principal.capabilities.includes("orders.create") ? <EnrollmentWorkspace /> : <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <NewOrderWorkspace principal={principal} /> : activePage === "Order History" && initialPage === "order-detail" && recordId ? <OrderRecordWorkspace recordId={recordId} /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
       {searchOpen ? <SearchModal onClose={() => setSearchOpen(false)} onSessionExpired={onSessionExpired} /> : null}
       {toast ? <div className="toast" role="status"><span className="toast-mark" aria-hidden="true">✓</span><span>{toast}</span></div> : null}
       {fixtureMode ? <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div> : null}
@@ -643,5 +651,7 @@ export function StaffPortal({
     return <LoginScreen view={authView === "otp" ? "otp" : "credentials"} challenge={challenge} initialMessage={notice} fixtureMode={fixtureMode} fixtureScenarios={fixtureScenarios} onAuthenticated={authenticate} onOtpRequired={(nextChallenge) => { setChallenge(nextChallenge); setNotice(""); setAuthView("otp"); }} onChallengeChange={setChallenge} onBack={() => { setChallenge(null); setAuthView("credentials"); }} />;
   }
 
-  return <DemoShell principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} recordId={recordId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
+  const shellKey = [initialPage, studentId, brochureView, brochureId, recordId].filter((value) => value !== undefined).join(":");
+
+  return <DemoShell key={shellKey} principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} recordId={recordId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
 }

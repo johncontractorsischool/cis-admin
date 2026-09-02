@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { getNewOrder, listNewOrders, markNewOrderShipped, markNewOrdersShipped, updateNewOrder, type NewOrderFilters } from "../../lib/new-order-api";
 import type { NewOrderDetail, NewOrderInput, NewOrderPagination, NewOrderSummary, SalespersonOption } from "../../lib/new-orders";
 import { StaffApiError } from "../../lib/staff-api";
+import type { StaffPrincipal } from "../../lib/staff";
 
 const emptyPagination: NewOrderPagination = { current_page: 1, per_page: 50, total: 0, last_page: 1 };
 
@@ -23,7 +25,7 @@ function printableDocument(kind: "labels" | "invoices", orders: NewOrderDetail[]
   return `<!doctype html><html><head><title>${kind === "labels" ? "Shipping labels" : "Order invoices"}</title><style>@page{margin:20mm}*{box-sizing:border-box}body{margin:0;color:#172631;font:14px Arial,sans-serif}.label{display:grid;gap:7px;width:4in;min-height:1.35in;padding:.18in .25in;border:1px dashed #9aabb4;page-break-after:always;font-size:16px;line-height:1.25}.label strong{font-size:18px}.invoice{page-break-after:always}.invoice header{display:flex;justify-content:space-between;border-bottom:3px solid #2387b6;padding-bottom:16px}.invoice header div:last-child{display:grid;text-align:right}.invoice h1{margin:0}.invoice h2{font-size:12px;text-transform:uppercase}.columns{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin:24px 0}.columns p{line-height:1.6}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #dce5ea;padding:10px;text-align:left}th:last-child,td:last-child{text-align:right}.notes{margin-top:24px;padding:12px;background:#f4f8fa}@media print{.label,.invoice{border-color:transparent}}</style></head><body>${body}<script>window.addEventListener("load",()=>window.print())</script></body></html>`;
 }
 
-export function NewOrderWorkspace() {
+export function NewOrderWorkspace({ principal }: { principal: StaffPrincipal }) {
   const [draftSearch, setDraftSearch] = useState("");
   const [filters, setFilters] = useState<NewOrderFilters>({ page: 1, perPage: 50 });
   const [orders, setOrders] = useState<NewOrderSummary[]>([]);
@@ -99,7 +101,7 @@ export function NewOrderWorkspace() {
   function change(field: keyof NewOrderInput, value: string | number | boolean | null) { setEditForm((current) => current ? { ...current, [field]: value } : current); }
 
   return <div className="student-workspace new-order-workspace">
-    <header className="student-page-header"><div><p className="eyebrow">Order fulfillment</p><h1>New Orders</h1><p>Review unshipped orders, correct customer and delivery details, and move completed packages into today’s shipments.</p></div><span className="order-queue-badge"><span aria-hidden="true">▣</span>{loading ? "Syncing queue" : `${pagination.total} awaiting shipment`}</span></header>
+    <header className="student-page-header"><div><p className="eyebrow">Order fulfillment</p><h1>New Orders</h1><p>Review unshipped orders, correct customer and delivery details, and move completed packages into today’s shipments.</p></div><div className="new-order-header-actions">{principal.capabilities.includes("orders.create") ? <Link className="primary-button" href="/staff/enrollments/new"><span aria-hidden="true">＋</span>Create customer order</Link> : null}<span className="order-queue-badge"><span aria-hidden="true">▣</span>{loading ? "Syncing queue" : `${pagination.total} awaiting shipment`}</span></div></header>
 
     <section className="new-order-toolbar" aria-label="New order tools">
       <form onSubmit={search}><label className="student-field"><span>Search orders</span><span className="student-search-wrap"><span aria-hidden="true">⌕</span><input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder="Order ID, customer, email, or phone" /></span></label><button className="primary-button" type="submit">Search</button><button className="secondary-button" type="button" onClick={clearSearch}>Clear</button></form>

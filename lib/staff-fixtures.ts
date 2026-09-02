@@ -47,6 +47,7 @@ const capabilitySets: Record<PersonaKey, string[]> = {
     "customer-devices.view",
     "customer-devices.delete",
     "orders.view",
+    "orders.create",
     "new-orders.view",
     "messages.view",
     "brochures.manage",
