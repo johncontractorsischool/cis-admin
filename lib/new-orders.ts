@@ -32,6 +32,7 @@ export interface NewOrderDetail extends NewOrderSummary {
   shipping_address: string | null;
   billing_address: string | null;
   sku: string | null;
+  classification?: string | null;
   item_description: string | null;
   subtotal: string | number | null;
   sales_tax: string | number | null;
