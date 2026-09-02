@@ -7,8 +7,11 @@ import {
   useState,
   type CSSProperties,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import Link from "next/link";
+import { searchStaff } from "../../lib/global-search-api";
+import type { GlobalSearchGroups, GlobalSearchResult } from "../../lib/global-search";
 import {
   login,
   logout,
@@ -27,10 +30,11 @@ import type { BrochureView } from "../../lib/brochures";
 import { brochureLinks, BrochureWorkspace } from "./brochure-workspace";
 import { CustomerDevicesWorkspace } from "./customer-devices-workspace";
 import { NewOrderWorkspace } from "./new-order-workspace";
+import { ApplicationRecordWorkspace, OrderRecordWorkspace } from "./search-record-workspace";
 import { StudentCreate, StudentDetails, StudentDirectory } from "./student-workspace";
 
 type AuthView = "credentials" | "otp" | "authenticated";
-export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new" | "customer-devices" | "new-order" | "brochures";
+export type StaffPortalPage = "dashboard" | "students" | "student-detail" | "student-new" | "customer-devices" | "new-order" | "brochures" | "order-detail" | "application-detail";
 type FixtureScenario = { label: string; username: string };
 type FixturePersona = { key: string; label: string };
 
@@ -332,9 +336,26 @@ function LoginScreen({
   );
 }
 
-function SearchModal({ onClose }: { onClose: () => void }) {
+function SearchModal({ onClose, onSessionExpired }: { onClose: () => void; onSessionExpired: () => void }) {
   const firstFieldRef = useRef<HTMLInputElement>(null);
-  const [searched, setSearched] = useState(false);
+  const requestRef = useRef(0);
+  const sessionExpiredRef = useRef(onSessionExpired);
+  const [query, setQuery] = useState("");
+  const [groups, setGroups] = useState<GlobalSearchGroups | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const groupDefinitions: Array<{ key: keyof GlobalSearchGroups; label: string; glyph: string }> = [
+    { key: "students", label: "Students", glyph: "ST" },
+    { key: "orders", label: "Orders", glyph: "OR" },
+    { key: "brochures", label: "Brochures", glyph: "BR" },
+    { key: "applications", label: "Applications", glyph: "AP" },
+  ];
+  const results = groups ? groupDefinitions.flatMap((group) => groups[group.key]) : [];
+
+  useEffect(() => {
+    sessionExpiredRef.current = onSessionExpired;
+  }, [onSessionExpired]);
 
   useEffect(() => {
     firstFieldRef.current?.focus();
@@ -345,23 +366,115 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      requestRef.current += 1;
+      return;
+    }
+
+    const requestId = requestRef.current + 1;
+    requestRef.current = requestId;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      searchStaff(term)
+        .then((response) => {
+          if (requestRef.current !== requestId) return;
+          setGroups(response.data.groups);
+          setActiveIndex(response.data.total ? 0 : -1);
+        })
+        .catch((caught) => {
+          if (requestRef.current !== requestId) return;
+          if (caught instanceof StaffApiError && caught.status === 401) {
+            sessionExpiredRef.current();
+            return;
+          }
+          setGroups(null);
+          setActiveIndex(-1);
+          setError(caught instanceof StaffApiError ? caught.message : "Search is temporarily unavailable. Please try again.");
+        })
+        .finally(() => { if (requestRef.current === requestId) setLoading(false); });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  function changeQuery(value: string) {
+    setQuery(value);
+    if (value.trim().length < 2) {
+      requestRef.current += 1;
+      setGroups(null);
+      setLoading(false);
+      setError("");
+      setActiveIndex(-1);
+    }
+  }
+
+  function navigateResults(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (!results.length) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex((current) => (current + 1) % results.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) => (current <= 0 ? results.length - 1 : current - 1));
+    } else if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      window.location.assign(results[activeIndex].href);
+    }
+  }
+
+  function resultIndex(result: GlobalSearchResult) {
+    return results.findIndex((candidate) => candidate.key === result.key);
+  }
+
   return (
     <div className="modal-backdrop">
       <button className="modal-dismiss-layer" type="button" aria-label="Close customer search" onClick={onClose} />
-      <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="search-title">
+      <section className="modal-card global-search-modal" role="dialog" aria-modal="true" aria-labelledby="search-title">
         <header className="modal-head">
-          <div><h2 id="search-title">Find a customer</h2><p>Search by any known customer detail.</p></div>
+          <div><h2 id="search-title">Global search</h2><p>Search students, orders, brochures, and applications.</p></div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="Close search">×</button>
         </header>
-        <form className="search-grid" onSubmit={(event) => { event.preventDefault(); setSearched(true); }}>
-          <div className="field"><label htmlFor="first-name">First name</label><input ref={firstFieldRef} id="first-name" placeholder="Jamie" /></div>
-          <div className="field"><label htmlFor="last-name">Last name</label><input id="last-name" placeholder="Rivera" /></div>
-          <div className="field"><label htmlFor="phone">Phone</label><input id="phone" type="tel" placeholder="(555) 000-0000" /></div>
-          <div className="field"><label htmlFor="email">Email</label><input id="email" type="email" placeholder="name@example.com" /></div>
-          <div className="field"><label htmlFor="app-fee">App Fee Number</label><input id="app-fee" placeholder="AF-000000" /></div>
-          <button className="primary-button" type="submit">Search customers <span className="arrow">→</span></button>
+        <form className="global-search-form" role="search" onSubmit={(event) => event.preventDefault()}>
+          <label className="sr-only" htmlFor="global-search-input">Search staff records</label>
+          <span className="global-search-icon" aria-hidden="true">⌕</span>
+          <input
+            ref={firstFieldRef}
+            id="global-search-input"
+            value={query}
+            onChange={(event) => changeQuery(event.target.value)}
+            onKeyDown={navigateResults}
+            placeholder="Name, email, phone, customer ID, order or application number"
+            autoComplete="off"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls="global-search-results"
+            aria-expanded={Boolean(groups && results.length)}
+            aria-activedescendant={activeIndex >= 0 ? `global-search-result-${results[activeIndex]?.key}` : undefined}
+          />
+          {loading ? <span className="global-search-spinner" aria-label="Searching" /> : query ? <button className="global-search-clear" type="button" onClick={() => changeQuery("")} aria-label="Clear search">×</button> : <kbd>ESC</kbd>}
         </form>
-        {searched ? <div className="search-results" role="status"><strong>No matching customers in this local fixture.</strong><p>The approved customer-search contract will replace this development state.</p></div> : null}
+        <div className="global-search-status" aria-live="polite">
+          {query.trim().length < 2 ? "Enter at least 2 characters to search live staff records." : loading ? "Searching live records…" : error ? error : groups ? `${results.length} ${results.length === 1 ? "record" : "records"} found.` : ""}
+        </div>
+        {error ? <div className="student-error global-search-error" role="alert"><strong>Search unavailable.</strong><span>{error}</span></div> : null}
+        {groups && !loading && !results.length ? <div className="search-results global-search-empty"><strong>No matching records.</strong><p>Try a full or partial name, email, phone number, customer ID, order number, or application number.</p></div> : null}
+        {groups && results.length ? <div id="global-search-results" className="global-search-results" role="listbox" aria-label="Search results">
+          {groupDefinitions.map((definition) => {
+            const items = groups[definition.key];
+            if (!items.length) return null;
+            return <section className="global-search-group" key={definition.key} aria-labelledby={`search-group-${definition.key}`}>
+              <h3 id={`search-group-${definition.key}`}>{definition.label}<span>{items.length}</span></h3>
+              <ul>{items.map((result) => {
+                const index = resultIndex(result);
+                return <li key={result.key}><Link id={`global-search-result-${result.key}`} role="option" aria-selected={activeIndex === index} className={activeIndex === index ? "active" : ""} href={result.href} onMouseEnter={() => setActiveIndex(index)} onFocus={() => setActiveIndex(index)}><span className={`global-search-kind ${result.type}`} aria-hidden="true">{definition.glyph}</span><span className="global-search-copy"><strong>{result.title}</strong><span>{result.subtitle || "No contact detail"}</span></span><span className="global-search-identifier">{result.identifier}<b aria-hidden="true">→</b></span></Link></li>;
+              })}</ul>
+            </section>;
+          })}
+        </div> : null}
+        <footer className="global-search-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Open</span><span><kbd>ESC</kbd> Close</span></footer>
       </section>
     </div>
   );
@@ -400,6 +513,7 @@ function DemoShell({
   studentId,
   brochureView,
   brochureId,
+  recordId,
   notice,
   onLogout,
   onPersonaChange,
@@ -412,13 +526,14 @@ function DemoShell({
   studentId?: number;
   brochureView?: BrochureView;
   brochureId?: number;
+  recordId?: number;
   notice: string;
   onLogout: () => void;
   onPersonaChange: (persona: string) => void;
   onSessionExpired: () => void;
 }) {
   const [activePage, setActivePage] = useState(
-    initialPage === "dashboard" ? "Dashboard" : initialPage === "customer-devices" ? "Customer Devices" : initialPage === "new-order" ? "New Orders" : initialPage === "brochures" ? "Brochures" : "Students",
+    initialPage === "dashboard" ? "Dashboard" : initialPage === "customer-devices" ? "Customer Devices" : initialPage === "new-order" ? "New Orders" : initialPage === "brochures" ? "Brochures" : initialPage === "order-detail" ? "Order History" : "Students",
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -455,8 +570,8 @@ function DemoShell({
         <div className="sidebar-foot"><button className="profile-button" type="button" onClick={() => showToast("Profile settings await an approved API contract.")}><span className="avatar">{initials(principal.name)}</span><span className="profile-copy"><strong>{principal.name}</strong><span>{principal.staffType ?? "staff"}</span></span><span aria-hidden="true">···</span></button></div>
       </aside>
       <header className="topbar"><button className="header-icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">☰</button><button className="topbar-search" type="button" onClick={() => setSearchOpen(true)}><span aria-hidden="true">⌕</span><span>Search customers</span><kbd>⌘ K</kbd></button><div className="topbar-actions"><button className="header-icon-button" type="button" onClick={() => showToast("No new fixture updates.")} aria-label="Staff updates">◔</button><button className="header-icon-button" type="button" onClick={onLogout} aria-label="Log out" title="Log out">↪</button></div></header>
-      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? <NewOrderWorkspace /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
-      {searchOpen ? <SearchModal onClose={() => setSearchOpen(false)} /> : null}
+      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "application-detail" && recordId ? <ApplicationRecordWorkspace recordId={recordId} /> : initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? <NewOrderWorkspace /> : activePage === "Order History" && initialPage === "order-detail" && recordId ? <OrderRecordWorkspace recordId={recordId} /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
+      {searchOpen ? <SearchModal onClose={() => setSearchOpen(false)} onSessionExpired={onSessionExpired} /> : null}
       {toast ? <div className="toast" role="status"><span className="toast-mark" aria-hidden="true">✓</span><span>{toast}</span></div> : null}
       {fixtureMode ? <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div> : null}
     </main>
@@ -472,6 +587,7 @@ export function StaffPortal({
   studentId,
   brochureView,
   brochureId,
+  recordId,
 }: {
   initialSession: StaffSessionBootstrap;
   fixtureMode: boolean;
@@ -481,6 +597,7 @@ export function StaffPortal({
   studentId?: number;
   brochureView?: BrochureView;
   brochureId?: number;
+  recordId?: number;
 }) {
   const initialPrincipal = initialSession.status === "authenticated" ? initialSession.principal : null;
   const [authView, setAuthView] = useState<AuthView>(initialPrincipal ? "authenticated" : "credentials");
@@ -526,5 +643,5 @@ export function StaffPortal({
     return <LoginScreen view={authView === "otp" ? "otp" : "credentials"} challenge={challenge} initialMessage={notice} fixtureMode={fixtureMode} fixtureScenarios={fixtureScenarios} onAuthenticated={authenticate} onOtpRequired={(nextChallenge) => { setChallenge(nextChallenge); setNotice(""); setAuthView("otp"); }} onChallengeChange={setChallenge} onBack={() => { setChallenge(null); setAuthView("credentials"); }} />;
   }
 
-  return <DemoShell principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
+  return <DemoShell principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} recordId={recordId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
 }

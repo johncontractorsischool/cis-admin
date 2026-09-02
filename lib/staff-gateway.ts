@@ -306,6 +306,44 @@ async function handleFixtureBrochures(request: Request, path: string) {
   return json({ data: null, meta: {}, message: "The requested brochure operation was not found." }, 404);
 }
 
+const fixtureApplication = {
+  id: 4201,
+  customer_id: 48219,
+  customer_name: "Jamie Rivera",
+  customer_email: "jamie.rivera@example.test",
+  customer_phone: "(916) 555-0142",
+  application_number: "APP-4242",
+  source_student_id: "STUDENT-48219",
+  app_fee_number: "AF-7777",
+  packet_type: "original",
+  status: "under_review",
+  stage: "staff_review",
+  law_exam_scheduled_at: "2026-09-21T16:00:00Z",
+  trade_exam_scheduled_at: "2026-09-23T16:00:00Z",
+  license_number: "",
+  source_updated_at: "2026-09-01T17:00:00Z",
+  synced_at: "2026-09-01T17:05:00Z",
+};
+
+function fixtureGlobalSearch(request: Request) {
+  const query = (new URL(request.url).searchParams.get("q") ?? "").trim();
+  if (query.length < 2 || query.length > 100) return error(422, "VALIDATION_ERROR", "Enter between 2 and 100 characters to search.");
+  const term = query.toLowerCase();
+  const matches = (value: string) => value.toLowerCase().includes(term);
+  const students = studentFixtures.filter((student) => matches(`${student.customerid} ${student.name} ${student.lname ?? ""} ${student.email} ${student.mobilenum ?? ""}`)).slice(0, 6).map((student) => ({ key: `student-${student.customerid}`, type: "student", record_id: String(student.customerid), title: `${student.name} ${student.lname ?? ""}`.trim(), subtitle: `${student.email} · ${student.mobilenum ?? ""}`, identifier: `Customer #${student.customerid}`, href: `/staff/students/${student.customerid}` }));
+  const orders = newOrderFixtures.filter((order) => matches(`${order.id} ${order.First_name} ${order.Last_name} ${order.cust_email} ${order.phone ?? ""}`)).slice(0, 6).map((order) => ({ key: `order-${order.id}`, type: "order", record_id: String(order.id), title: `Order #${order.id}`, subtitle: `${order.First_name} ${order.Last_name}`, identifier: `${order.sku ?? ""} · ${order.order_date ?? ""}`, href: `/staff/orders/${order.id}` }));
+  const brochures = brochureFixtures.filter((brochure) => matches(`${brochure.id} ${brochure.full_name} ${brochure.email} ${brochure.phone ?? ""}`)).slice(0, 6).map((brochure) => ({ key: `brochure-${brochure.id}`, type: "brochure", record_id: String(brochure.id), title: brochure.full_name, subtitle: `${brochure.email} · ${brochure.phone ?? ""}`, identifier: `Brochure #${brochure.id}`, href: `/staff/brochures/${brochure.id}` }));
+  const applications = matches(`${fixtureApplication.application_number} ${fixtureApplication.app_fee_number} ${fixtureApplication.customer_id} ${fixtureApplication.customer_name} ${fixtureApplication.customer_email} ${fixtureApplication.customer_phone}`) ? [{ key: `application-${fixtureApplication.id}`, type: "application", record_id: String(fixtureApplication.id), title: `Application ${fixtureApplication.application_number}`, subtitle: fixtureApplication.customer_name, identifier: "Under review · Staff review", href: `/staff/applications/${fixtureApplication.id}` }] : [];
+  const groups = { students, orders, brochures, applications };
+  return json({ data: { query, groups, total: Object.values(groups).reduce((total, items) => total + items.length, 0) }, meta: {}, message: "Staff search completed successfully." });
+}
+
+function fixtureOrderRecord(id: number) {
+  const order = newOrderFixtures.find((entry) => entry.id === id);
+  if (!order) return json({ data: null, meta: {}, message: "Order not found." }, 404);
+  return json({ data: { id: order.id, order_number: String(order.id), customer_name: `${order.First_name} ${order.Last_name}`, email: order.cust_email, phone: order.phone ?? "", company: order.company ?? "", sku: order.sku ?? "", classification: "", salesperson: order.salesperson ?? "", order_date: order.order_date ?? "", ship_date: order.ship_date ?? "", tracking_number: "", shipping_type: order.shipping_type ?? "", subtotal: order.subtotal, shipping_price: order.shipping_price, sales_tax: order.sales_tax, grand_total: order.grand_total, item_description: order.item_description ?? "", instructions: order.orderinstructions ?? "", shipped: Boolean(order.shipped) }, meta: {}, message: "Order retrieved successfully." });
+}
+
 async function handleFixture(request: Request, path: string): Promise<Response> {
   if (path === "/auth/login" && request.method === "POST") {
     let body: { username?: unknown; password?: unknown };
@@ -346,6 +384,25 @@ async function handleFixture(request: Request, path: string): Promise<Response> 
 
   if (path === "/logout" && request.method === "POST") {
     return new Response(null, { status: 204, headers: { ...NO_STORE_HEADERS, "set-cookie": clearCookie("cis_staff_fixture", request) } });
+  }
+
+  if (path === "/search" && request.method === "GET") {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return fixtureGlobalSearch(request);
+  }
+
+  const fixtureOrderMatch = path.match(/^\/orders\/(\d+)$/);
+  if (fixtureOrderMatch && request.method === "GET") {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return fixtureOrderRecord(Number(fixtureOrderMatch[1]));
+  }
+
+  const fixtureApplicationMatch = path.match(/^\/applications\/(\d+)$/);
+  if (fixtureApplicationMatch && request.method === "GET") {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return Number(fixtureApplicationMatch[1]) === fixtureApplication.id
+      ? json({ data: fixtureApplication, meta: {}, message: "Application retrieved successfully." })
+      : json({ data: null, meta: {}, message: "Application not found." }, 404);
   }
 
   if (path.startsWith("/students")) {
