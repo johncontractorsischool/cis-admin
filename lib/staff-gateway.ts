@@ -20,6 +20,19 @@ const NO_STORE_HEADERS = {
 };
 const TOKEN_COOKIE = "cis_staff_token";
 
+const fixtureProfiles = new Map<string, { id: number; username: string; name: string; last_name: string; email: string; mail_form_name: string; signature: string }>();
+let fixtureOffices = [{ id: 1, address: "1330 Spring Street", city: "Paso Robles", state: "CA", zip: "93446", sales_tax: 0.0875, phone: "805-555-0110", email: "office@example.test" }];
+let fixtureClassLocations = [{ id: 1, name: "Sacramento Weekend", room: "Training Room A", address: "100 Main Street", city: "Sacramento", state: "CA", zip: "95814", trade_time: "8:00 AM", law_time: "1:00 PM", max_size: 40, spanish: false }];
+let fixtureValidIps = [{ id: 1, ip: "127.0.0.1" }, { id: 2, ip: "203.0.113.10" }];
+let fixtureFirewall: Array<{ id: number; ip_address: string; mode: "allow" | "block"; whitelisted: boolean; created_at: string }> = [{ id: 1, ip_address: "198.51.100.77", mode: "block", whitelisted: false, created_at: "2026-09-01T16:00:00Z" }];
+let fixtureCheckout = { customer_checkout: { google_pay: true, apple_pay: true, paypal: true }, staff_checkout: { card: false, check: true, cash: true } };
+let fixtureSkus = [
+  { id: 1, sku: "KIT-B", name: "B General Building study package", staff_name: "B study kit", description: "Books and online course access.", subtotal: "500.00", sales_tax: "40.00", active: true, staff_visible: true, requires_shipping: true, popular: true },
+  { id: 2, sku: "ONLINE-LAW", name: "Law online course", staff_name: "Law online", description: "Online-only course.", subtotal: "295.00", sales_tax: "0.00", active: true, staff_visible: true, requires_shipping: false, popular: false },
+];
+let fixtureAgreements = [{ id: 1, first_time: "new", revision_date: "2026-08-15", body: "I acknowledge the enrollment terms and cancellation policy.", active: true }];
+const fixtureFirstTimes = [{ value: "new", label: "New student" }, { value: "returning", label: "Returning student" }];
+
 function json(value: unknown, status = 200, headers?: HeadersInit) {
   return Response.json(value, {
     status,
@@ -368,7 +381,7 @@ function fixtureEnrollmentOptions(customerId: number) {
     ],
     classifications: [{ id: 44, code: "B", name: "General Building Contractor" }, { id: 59, code: "C-10", name: "Electrical Contractor" }],
     shipping_methods: [{ id: "none", label: "No shipping", price: "0.00" }, { id: "ground", label: "UPS Ground", price: "16.85" }, { id: "two_day", label: "UPS Two Day", price: "38.50" }, { id: "next_day", label: "UPS Next Day", price: "54.50" }],
-    payment_methods: [{ id: "card", label: "Credit card", enabled: false }, { id: "check", label: "Check", enabled: true }, { id: "cash", label: "Cash", enabled: true }],
+    payment_methods: [{ id: "card", label: "Credit card", enabled: fixtureCheckout.staff_checkout.card }, { id: "check", label: "Check", enabled: fixtureCheckout.staff_checkout.check }, { id: "cash", label: "Cash", enabled: fixtureCheckout.staff_checkout.cash }],
     card_tokenization: { enabled: false, login_id: null, client_key: null, script_url: null },
     maximum_discount_percent: 100,
   }, meta: {}, message: "Staff enrollment options retrieved successfully." });
@@ -411,6 +424,70 @@ async function handleFixtureEnrollment(request: Request, path: string) {
   return error(404, "VALIDATION_ERROR", "The requested enrollment operation was not found.");
 }
 
+async function handleFixtureSettings(request: Request, path: string, persona: NonNullable<ReturnType<typeof readFixturePersona>>) {
+  const principal = createFixturePrincipal(persona);
+  const isManager = principal.capabilities.includes("settings.manage");
+  if (path === "/profile") {
+    const names = principal.name.split(" ");
+    const current = fixtureProfiles.get(persona) ?? { id: principal.id, username: principal.username, name: names[0] ?? principal.name, last_name: names.slice(1).join(" "), email: principal.email, mail_form_name: principal.name, signature: "Thank you,\n" + principal.name };
+    if (request.method === "GET") return json({ data: current, meta: {}, message: "Staff profile retrieved." });
+    if (request.method === "PATCH") {
+      const input = await request.json() as Partial<typeof current>;
+      const updated = { ...current, ...input, id: current.id, username: current.username };
+      fixtureProfiles.set(persona, updated);
+      return json({ data: updated, meta: {}, message: "Profile settings updated." });
+    }
+  }
+  if (path === "/profile/password" && request.method === "PUT") {
+    const input = await request.json() as { current_password?: string; new_password?: string; new_password_confirmation?: string };
+    if (input.current_password !== "staff-demo") return error(422, "VALIDATION_ERROR", "The current password is incorrect.");
+    if (!input.new_password || input.new_password.length < 12 || input.new_password !== input.new_password_confirmation) return error(422, "VALIDATION_ERROR", "Use at least 12 characters and confirm the new password.");
+    return json({ data: { other_sessions_revoked: 1 }, meta: {}, message: "Password updated securely." });
+  }
+
+  if (!isManager) return error(403, "FORBIDDEN", "You are not authorized to manage system settings.");
+  const list = <T>(items: T[], message: string, extra: Record<string, unknown> = {}) => json({ data: { items, ...extra }, meta: { pagination: { current_page: 1, per_page: 100, total: items.length, last_page: 1 } }, message });
+  const body = async () => await request.json() as Record<string, unknown>;
+
+  if (path === "/office_location" && request.method === "GET") return list(fixtureOffices, "Office locations retrieved.");
+  if (path === "/office_location" && request.method === "POST") { const input = await body(); const item = { ...input, id: Date.now() } as typeof fixtureOffices[number]; fixtureOffices = [...fixtureOffices, item]; return json({ data: item, meta: {}, message: "Office location created." }, 201); }
+  const officeMatch = path.match(/^\/office_location\/(\d+)$/);
+  if (officeMatch && request.method === "PATCH") { const id = Number(officeMatch[1]); const input = await body(); fixtureOffices = fixtureOffices.map((item) => item.id === id ? { ...item, ...input } as typeof item : item); return json({ data: fixtureOffices.find((item) => item.id === id), meta: {}, message: "Office location updated." }); }
+  if (officeMatch && request.method === "DELETE") { fixtureOffices = fixtureOffices.filter((item) => item.id !== Number(officeMatch[1])); return json({ data: null, meta: {}, message: "Office location deleted." }); }
+
+  if (path === "/settings/class-locations" && request.method === "GET") return list(fixtureClassLocations, "Class locations retrieved.");
+  if (path === "/settings/class-locations" && request.method === "POST") { const input = await body(); const item = { id: Date.now(), name: String(input.Cities), room: String(input.Room), address: String(input.Address ?? ""), city: String(input.City ?? ""), state: String(input.State ?? ""), zip: String(input.Zip ?? ""), trade_time: String(input.Trade_Time ?? ""), law_time: String(input.Law_Time ?? ""), max_size: Number(input.max_size ?? 1), spanish: Boolean(input.es) }; fixtureClassLocations = [...fixtureClassLocations, item]; return json({ data: item, meta: {}, message: "Class location created." }, 201); }
+  const classMatch = path.match(/^\/settings\/class-locations\/(\d+)$/);
+  if (classMatch && request.method === "PATCH") { const id = Number(classMatch[1]); const input = await body(); fixtureClassLocations = fixtureClassLocations.map((item) => item.id === id ? { ...item, name: String(input.Cities ?? item.name), room: String(input.Room ?? item.room), address: String(input.Address ?? item.address), city: String(input.City ?? item.city), state: String(input.State ?? item.state), zip: String(input.Zip ?? item.zip), trade_time: String(input.Trade_Time ?? item.trade_time), law_time: String(input.Law_Time ?? item.law_time), max_size: Number(input.max_size ?? item.max_size), spanish: input.es === undefined ? item.spanish : Boolean(input.es) } : item); return json({ data: fixtureClassLocations.find((item) => item.id === id), meta: {}, message: "Class location updated." }); }
+  if (classMatch && request.method === "DELETE") { fixtureClassLocations = fixtureClassLocations.filter((item) => item.id !== Number(classMatch[1])); return json({ data: null, meta: {}, message: "Class location deleted." }); }
+
+  if (path === "/manage_valid_ips" && request.method === "GET") return list(fixtureValidIps, "Valid IPs retrieved.");
+  if (path === "/manage_valid_ips" && request.method === "POST") { const input = await body(); const item = { id: Date.now(), ip: String(input.ip) }; fixtureValidIps = [...fixtureValidIps, item]; return json({ data: item, meta: {}, message: "Valid IP created." }, 201); }
+  const ipMatch = path.match(/^\/manage_valid_ips\/(\d+)$/);
+  if (ipMatch && request.method === "DELETE") { const id = Number(ipMatch[1]); if (fixtureValidIps.find((item) => item.id === id)?.ip === "127.0.0.1") return error(409, "CURRENT_IP_LOCKOUT", "The current session IP cannot be removed."); fixtureValidIps = fixtureValidIps.filter((item) => item.id !== id); return json({ data: null, meta: {}, message: "Valid IP deleted." }); }
+
+  if (path === "/settings/firewall" && request.method === "GET") return list(fixtureFirewall, "Firewall entries retrieved.", { current_ip: "127.0.0.1" });
+  if (path === "/settings/firewall" && request.method === "POST") { const input = await body(); if (input.ip_address === "127.0.0.1" && !input.whitelisted) return error(409, "CURRENT_IP_LOCKOUT", "This change would block the current session IP."); const item = { id: Date.now(), ip_address: String(input.ip_address), whitelisted: Boolean(input.whitelisted), mode: (input.whitelisted ? "allow" : "block") as "allow" | "block", created_at: new Date().toISOString() }; fixtureFirewall = [...fixtureFirewall, item]; return json({ data: item, meta: {}, message: "Firewall entry created." }, 201); }
+  const firewallMatch = path.match(/^\/settings\/firewall\/(\d+)$/);
+  if (firewallMatch && request.method === "PATCH") { const id = Number(firewallMatch[1]); const input = await body(); fixtureFirewall = fixtureFirewall.map((item) => item.id === id ? { ...item, whitelisted: Boolean(input.whitelisted), mode: input.whitelisted ? "allow" : "block" } : item); return json({ data: fixtureFirewall.find((item) => item.id === id), meta: {}, message: "Firewall entry updated." }); }
+  if (firewallMatch && request.method === "DELETE") { fixtureFirewall = fixtureFirewall.filter((item) => item.id !== Number(firewallMatch[1])); return json({ data: null, meta: {}, message: "Firewall entry deleted." }); }
+
+  if (path === "/settings/checkout-payment-methods" && request.method === "GET") return json({ data: fixtureCheckout, meta: {}, message: "Checkout payment visibility retrieved." });
+  if (path === "/settings/checkout-payment-methods" && request.method === "PUT") { const input = await body(); if (!input.staff_card && !input.staff_check && !input.staff_cash) return error(422, "VALIDATION_ERROR", "At least one Staff Hub payment method must remain visible."); fixtureCheckout = { customer_checkout: { google_pay: Boolean(input.google_pay), apple_pay: Boolean(input.apple_pay), paypal: Boolean(input.paypal) }, staff_checkout: { card: Boolean(input.staff_card), check: Boolean(input.staff_check), cash: Boolean(input.staff_cash) } }; return json({ data: fixtureCheckout, meta: {}, message: "Checkout payment visibility updated." }); }
+
+  if (path === "/settings/skus" && request.method === "GET") return list(fixtureSkus, "SKU settings retrieved.");
+  if (path === "/settings/skus" && request.method === "POST") { const input = await body(); const item = { ...input, id: Date.now(), sku: String(input.sku).toUpperCase(), subtotal: Number(input.subtotal).toFixed(2), sales_tax: Number(input.sales_tax ?? 0).toFixed(2) } as typeof fixtureSkus[number]; fixtureSkus = [...fixtureSkus, item]; return json({ data: item, meta: {}, message: "SKU created." }, 201); }
+  const skuMatch = path.match(/^\/settings\/skus\/(\d+)$/);
+  if (skuMatch && request.method === "PATCH") { const id = Number(skuMatch[1]); const input = await body(); fixtureSkus = fixtureSkus.map((item) => item.id === id ? { ...item, ...input } as typeof item : item); return json({ data: fixtureSkus.find((item) => item.id === id), meta: {}, message: "SKU updated." }); }
+
+  if (path === "/settings/enrollment-agreements" && request.method === "GET") return json({ data: { items: fixtureAgreements, first_time_options: fixtureFirstTimes }, meta: { pagination: { current_page: 1, per_page: 100, total: fixtureAgreements.length, last_page: 1 } }, message: "Enrollment agreements retrieved." });
+  if (path === "/settings/enrollment-agreements" && request.method === "POST") { const input = await body(); if (input.active) fixtureAgreements = fixtureAgreements.map((item) => item.first_time === input.first_time ? { ...item, active: false } : item); const item = { id: Date.now(), first_time: String(input.first_time), revision_date: String(input.revision_date), body: String(input.body), active: Boolean(input.active) }; fixtureAgreements = [item, ...fixtureAgreements]; return json({ data: item, meta: {}, message: "Enrollment agreement created." }, 201); }
+  const agreementMatch = path.match(/^\/settings\/enrollment-agreements\/(\d+)$/);
+  if (agreementMatch && request.method === "PATCH") { const id = Number(agreementMatch[1]); const input = await body(); if (input.active) fixtureAgreements = fixtureAgreements.map((item) => item.first_time === input.first_time ? { ...item, active: false } : item); fixtureAgreements = fixtureAgreements.map((item) => item.id === id ? { ...item, ...input } as typeof item : item); return json({ data: fixtureAgreements.find((item) => item.id === id), meta: {}, message: "Enrollment agreement updated." }); }
+
+  return error(404, "VALIDATION_ERROR", "The requested settings operation was not found.");
+}
+
 async function handleFixture(request: Request, path: string): Promise<Response> {
   if (path === "/auth/login" && request.method === "POST") {
     let body: { username?: unknown; password?: unknown };
@@ -451,6 +528,12 @@ async function handleFixture(request: Request, path: string): Promise<Response> 
 
   if (path === "/logout" && request.method === "POST") {
     return new Response(null, { status: 204, headers: { ...NO_STORE_HEADERS, "set-cookie": clearCookie("cis_staff_fixture", request) } });
+  }
+
+  if (path === "/profile" || path === "/profile/password" || path.startsWith("/settings/") || path === "/office_location" || path.startsWith("/office_location/") || path === "/manage_valid_ips" || path.startsWith("/manage_valid_ips/")) {
+    const persona = readFixturePersona(request);
+    if (!persona) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return handleFixtureSettings(request, path, persona);
   }
 
   if (path === "/search" && request.method === "GET") {
@@ -566,8 +649,12 @@ function normalizedErrorCode(upstreamCode: unknown, status: number): StaffAuthEr
     staff_token_inactive: "SESSION_EXPIRED",
     staff_token_required: "SESSION_EXPIRED",
     invalid_staff_token: "SESSION_EXPIRED",
+    current_ip_lockout: "CURRENT_IP_LOCKOUT",
+    settings_unavailable: "SETTINGS_UNAVAILABLE",
+    payment_method_disabled: "PAYMENT_METHOD_DISABLED",
+    PAYMENT_METHOD_DISABLED: "PAYMENT_METHOD_DISABLED",
   };
-  return mapping[code] ?? (status === 422 ? "VALIDATION_ERROR" : status === 401 ? "SESSION_EXPIRED" : status === 429 ? "RATE_LIMITED" : "AUTH_UNAVAILABLE");
+  return mapping[code] ?? (status === 422 ? "VALIDATION_ERROR" : status === 401 ? "SESSION_EXPIRED" : status === 403 ? "FORBIDDEN" : status === 429 ? "RATE_LIMITED" : "AUTH_UNAVAILABLE");
 }
 
 async function authRequestShape(request: Request, path: string) {
@@ -620,6 +707,13 @@ export async function handleStaffApiRequest(request: Request, path: string) {
     } as RequestInit & { duplex: "half" });
   } catch {
     return error(503, "AUTH_UNAVAILABLE", "The sign-in service is temporarily unavailable. Please retry.");
+  }
+
+  const isSettingsPath = path === "/profile" || path === "/profile/password" || path.startsWith("/settings/") || path === "/office_location" || path.startsWith("/office_location/") || path === "/manage_valid_ips" || path.startsWith("/manage_valid_ips/");
+  if (!upstream.ok && isSettingsPath) {
+    let payload: { meta?: Record<string, unknown>; message?: string } = {};
+    try { payload = await upstream.json() as typeof payload; } catch { /* normalized below */ }
+    return error(upstream.status, normalizedErrorCode(payload.meta?.error_code ?? payload.meta?.code, upstream.status), payload.message ?? "The settings service is temporarily unavailable. Please retry.");
   }
 
   const isAuthPath = path.startsWith("/auth/") || path === "/me" || path === "/logout";
