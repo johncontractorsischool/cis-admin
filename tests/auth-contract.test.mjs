@@ -5,10 +5,14 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 
 test("documents every staff authentication endpoint and stable error code", async () => {
-  const [contract, types] = await Promise.all([
+  const [contract, types, gateway] = await Promise.all([
     readFile(new URL("docs/staff-auth-contract.md", root), "utf8"),
     readFile(new URL("lib/staff.ts", root), "utf8"),
+    readFile(new URL("lib/staff-gateway.ts", root), "utf8"),
   ]);
+
+  assert.match(gateway, /path === "\/me" \|\| path === "\/logout"/);
+  assert.match(gateway, /path: `\/auth\$\{path\}`/);
 
   for (const endpoint of [
     "POST /api/v1/staff/auth/login",

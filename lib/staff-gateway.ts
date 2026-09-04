@@ -758,6 +758,13 @@ function normalizedErrorCode(upstreamCode: unknown, status: number): StaffAuthEr
 }
 
 async function authRequestShape(request: Request, path: string) {
+  if (path === "/me" || path === "/logout") {
+    return {
+      path: `/auth${path}`,
+      body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
+    };
+  }
+
   const verify = path.match(/^\/auth\/challenges\/([^/]+)\/verify$/);
   const resend = path.match(/^\/auth\/challenges\/([^/]+)\/resend$/);
   if (!verify && !resend) return { path, body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body };
