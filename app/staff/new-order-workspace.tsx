@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { getNewOrder, listNewOrders, markNewOrderShipped, markNewOrdersShipped, updateNewOrder, type NewOrderFilters } from "../../lib/new-order-api";
+import { getNewOrder, getNewOrderPrintDocument, listNewOrders, markNewOrderShipped, markNewOrdersShipped, updateNewOrder, type NewOrderFilters } from "../../lib/new-order-api";
 import type { NewOrderDetail, NewOrderInput, NewOrderPagination, NewOrderSummary, SalespersonOption } from "../../lib/new-orders";
 import { StaffApiError } from "../../lib/staff-api";
 import type { StaffPrincipal } from "../../lib/staff";
@@ -12,17 +12,9 @@ const emptyPagination: NewOrderPagination = { current_page: 1, per_page: 50, tot
 function fullName(order: Pick<NewOrderSummary, "First_name" | "Last_name">) { return `${order.First_name} ${order.Last_name}`.trim(); }
 function money(value: string | number | null) { const number = Number(value ?? 0); return Number.isFinite(number) ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(number) : "—"; }
 function readableError(caught: unknown) { return caught instanceof StaffApiError ? caught.message : "New orders are temporarily unavailable. Please retry."; }
-function escapeHtml(value: unknown) { return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character); }
 
 function orderInput(order: NewOrderDetail): NewOrderInput {
   return { first_name: order.First_name, last_name: order.Last_name, email: order.cust_email, phone: order.phone ?? "", phone_extension: order.phone_extension ?? "", company: order.company ?? "", non_sale: Boolean(order.non_sale), admin_id: order.admin_id, ...order.shipping };
-}
-
-function printableDocument(kind: "labels" | "invoices", orders: NewOrderDetail[]) {
-  const body = kind === "labels"
-    ? orders.map((order) => `<section class="label"><strong>${escapeHtml(fullName(order))}</strong><span>${escapeHtml(order.shipping.address1)} ${escapeHtml(order.shipping.address2)}</span><span>${escapeHtml(order.shipping.city)}, ${escapeHtml(order.shipping.state)} ${escapeHtml(order.shipping.zip)}</span></section>`).join("")
-    : orders.map((order) => `<section class="invoice"><header><div><h1>Contractor Institute</h1><p>Order #${order.id}</p></div><div><strong>${escapeHtml(order.order_date)}</strong><span>${escapeHtml(order.salesperson)}</span></div></header><div class="columns"><div><h2>Customer</h2><p>${escapeHtml(fullName(order))}<br>${escapeHtml(order.company)}<br>${escapeHtml(order.cust_email)}<br>${escapeHtml(order.phone)}</p></div><div><h2>Ship to</h2><p>${escapeHtml(order.shipping.address1)} ${escapeHtml(order.shipping.address2)}<br>${escapeHtml(order.shipping.city)}, ${escapeHtml(order.shipping.state)} ${escapeHtml(order.shipping.zip)}</p></div></div><table><thead><tr><th>Description</th><th>Amount</th></tr></thead><tbody>${order.items.map((item) => `<tr><td>${escapeHtml(item.description)}</td><td>${escapeHtml(money(item.price))}</td></tr>`).join("")}</tbody><tfoot><tr><th>Total</th><th>${escapeHtml(money(order.grand_total))}</th></tr></tfoot></table>${order.orderinstructions ? `<p class="notes"><strong>Instructions:</strong> ${escapeHtml(order.orderinstructions)}</p>` : ""}</section>`).join("");
-  return `<!doctype html><html><head><title>${kind === "labels" ? "Shipping labels" : "Order invoices"}</title><style>@page{margin:20mm}*{box-sizing:border-box}body{margin:0;color:#172631;font:14px Arial,sans-serif}.label{display:grid;gap:7px;width:4in;min-height:1.35in;padding:.18in .25in;border:1px dashed #9aabb4;page-break-after:always;font-size:16px;line-height:1.25}.label strong{font-size:18px}.invoice{page-break-after:always}.invoice header{display:flex;justify-content:space-between;border-bottom:3px solid #2387b6;padding-bottom:16px}.invoice header div:last-child{display:grid;text-align:right}.invoice h1{margin:0}.invoice h2{font-size:12px;text-transform:uppercase}.columns{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin:24px 0}.columns p{line-height:1.6}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #dce5ea;padding:10px;text-align:left}th:last-child,td:last-child{text-align:right}.notes{margin-top:24px;padding:12px;background:#f4f8fa}@media print{.label,.invoice{border-color:transparent}}</style></head><body>${body}<script>window.addEventListener("load",()=>window.print())</script></body></html>`;
 }
 
 export function NewOrderWorkspace({ principal }: { principal: StaffPrincipal }) {
@@ -91,9 +83,10 @@ export function NewOrderWorkspace({ principal }: { principal: StaffPrincipal }) 
     printWindow.document.write("<p style='font-family:sans-serif'>Preparing selected orders…</p>");
     setPending(true); setError("");
     try {
-      const details = await Promise.all([...selected].map((id) => getNewOrder(id).then((response) => response.data.order)));
-      printWindow.document.open(); printWindow.document.write(printableDocument(kind, details)); printWindow.document.close();
-      setNotice(`${kind === "labels" ? "Label" : "Invoice"} print view opened for ${details.length} selected ${details.length === 1 ? "order" : "orders"}.`);
+      const document = await getNewOrderPrintDocument(kind, [...selected]);
+      printWindow.document.open(); printWindow.document.write(document); printWindow.document.close();
+      printWindow.setTimeout(() => { printWindow.focus(); printWindow.print(); }, 150);
+      setNotice(`${kind === "labels" ? "Label" : "Invoice"} print view opened for ${selected.size} selected ${selected.size === 1 ? "order" : "orders"}.`);
     } catch (caught) { printWindow.close(); setError(readableError(caught)); }
     finally { setPending(false); }
   }
@@ -105,7 +98,7 @@ export function NewOrderWorkspace({ principal }: { principal: StaffPrincipal }) 
 
     <section className="new-order-toolbar" aria-label="New order tools">
       <form onSubmit={search}><label className="student-field"><span>Search orders</span><span className="student-search-wrap"><span aria-hidden="true">⌕</span><input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder="Order ID, customer, email, or phone" /></span></label><button className="primary-button" type="submit">Search</button><button className="secondary-button" type="button" onClick={clearSearch}>Clear</button></form>
-      <div className="order-bulk-actions"><span>{selected.size ? `${selected.size} selected` : "Select orders for bulk actions"}</span><button type="button" className="secondary-button" disabled={!selected.size || pending} onClick={() => void printSelected("labels")}>Export labels</button><button type="button" className="secondary-button" disabled={!selected.size || pending} onClick={() => void printSelected("invoices")}>Export invoices</button><button type="button" className="order-ship-button" disabled={!selected.size || pending} onClick={() => setShipIds([...selected])}>Mark selected shipped</button></div>
+      <div className="order-bulk-actions"><span>{selected.size ? `${selected.size} selected` : "Select orders for bulk actions"}</span><button type="button" className="secondary-button" disabled={!selected.size || pending} onClick={() => void printSelected("labels")}>Print labels</button><button type="button" className="secondary-button" disabled={!selected.size || pending} onClick={() => void printSelected("invoices")}>Print invoices</button><button type="button" className="order-ship-button" disabled={!selected.size || pending} onClick={() => setShipIds([...selected])}>Mark selected shipped</button></div>
     </section>
 
     {error ? <div className="student-error" role="alert"><strong>Order action failed.</strong><span>{error}</span><button className="text-button" type="button" onClick={() => setError("")}>Dismiss</button></div> : null}

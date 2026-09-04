@@ -227,8 +227,24 @@ function fixtureNewOrderList(request: Request) {
   });
 }
 
+function fixtureNewOrderPrintDocument(kind: "labels" | "invoices", ids: number[]) {
+  const escape = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character] ?? character);
+  const orders = ids.map((id) => newOrderFixtures.find((order) => order.id === id)).filter((order): order is typeof newOrderFixtures[number] => Boolean(order));
+  if (orders.length !== ids.length) return json({ data: null, meta: {}, message: "One or more new orders not found." }, 404);
+  const body = kind === "labels"
+    ? orders.map((order) => `<section><strong>${escape(`${order.First_name} ${order.Last_name}`)}</strong><br>${escape(order.shipping.address1)} ${escape(order.shipping.address2)}<br>${escape(order.shipping.city)}, ${escape(order.shipping.state)} ${escape(order.shipping.zip)}</section>`).join("")
+    : orders.map((order) => `<section><h1>Contractor Institute</h1><h2>Order #${order.id}</h2><p>${escape(`${order.First_name} ${order.Last_name}`)}<br>${escape(order.cust_email)}</p><table>${order.items.map((item) => `<tr><td>${escape(item.description)}</td><td>${escape(item.price)}</td></tr>`).join("")}</table></section>`).join("");
+  return new Response(`<!doctype html><html><head><title>New order ${kind}</title><style>body{font:14px Arial,sans-serif;color:#172631}section{page-break-after:always;padding:20px}table{width:100%}td{padding:8px;border-bottom:1px solid #ddd}</style></head><body>${body}</body></html>`, { status: 200, headers: { ...NO_STORE_HEADERS, "content-type": "text/html; charset=UTF-8" } });
+}
+
 async function handleFixtureNewOrders(request: Request, path: string) {
   if ((path === "/new_order" || path === "/new_order/ajax_new_order") && request.method === "GET") return fixtureNewOrderList(request);
+  if ((path === "/new_order/labels" || path === "/new_order/invoices") && request.method === "POST") {
+    const input = (await request.json()) as { ids?: number[] };
+    const ids = Array.isArray(input.ids) ? input.ids.map(Number) : [];
+    if (!ids.length || ids.length > 100 || new Set(ids).size !== ids.length) return json({ data: null, meta: {}, message: "Select between 1 and 100 unique orders." }, 422);
+    return fixtureNewOrderPrintDocument(path.endsWith("labels") ? "labels" : "invoices", ids);
+  }
   if (path === "/new_order/shipped_selected" && request.method === "POST") {
     const input = (await request.json()) as { ids?: number[] };
     const ids = Array.isArray(input.ids) ? input.ids.map(Number) : [];
@@ -573,7 +589,9 @@ async function handleFixture(request: Request, path: string): Promise<Response> 
   }
 
   if (path.startsWith("/new_order")) {
-    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    const persona = readFixturePersona(request);
+    if (!persona) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    if (!createFixturePrincipal(persona).capabilities.includes("new-orders.view")) return error(403, "FORBIDDEN", "You are not authorized to access the new-order queue.");
     return handleFixtureNewOrders(request, path);
   }
 
@@ -615,7 +633,7 @@ function capabilityList(staff: Record<string, unknown>) {
     capabilities.add("orders.create");
   }
   if (permissions.live_pending_orders) capabilities.add("orders.create");
-  if (type === "superadmin" || permissions.shipping_access || (!permissions.translator && !permissions.instructor)) capabilities.add("new-orders.view");
+  if (type === "superadmin" || permissions.shipping_access || (!permissions.translator && !permissions.instructor && !permissions.insurance_agent)) capabilities.add("new-orders.view");
   return [...capabilities];
 }
 
