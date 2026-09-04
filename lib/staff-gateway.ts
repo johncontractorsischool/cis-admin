@@ -13,6 +13,8 @@ import type { BrochureInput, BrochureTemplateInput } from "./brochures";
 import type { NewOrderInput } from "./new-orders";
 import type { StaffApiErrorBody, StaffAuthErrorCode, StaffPrincipal } from "./staff";
 import type { StudentInput } from "./students";
+import { initialMessageFixtures, messageCustomerFixtures, messageStaffFixtures } from "./message-center-fixtures";
+import type { BrochureConversionInput, MessageUpdateInput, StaffMessage } from "./message-center";
 
 const NO_STORE_HEADERS = {
   "cache-control": "no-store, max-age=0",
@@ -32,6 +34,7 @@ let fixtureSkus = [
 ];
 let fixtureAgreements = [{ id: 1, first_time: "new", revision_date: "2026-08-15", body: "I acknowledge the enrollment terms and cancellation policy.", active: true }];
 const fixtureFirstTimes = [{ value: "new", label: "New student" }, { value: "returning", label: "Returning student" }];
+let fixtureMessages: StaffMessage[] = initialMessageFixtures.map((message) => ({ ...message }));
 
 function json(value: unknown, status = 200, headers?: HeadersInit) {
   return Response.json(value, {
@@ -209,6 +212,80 @@ function handleFixtureCustomerDevices(request: Request, path: string) {
     return json({ data: { id: Number(deleteMatch[1]) }, meta: {}, message: "Customer device deleted successfully." });
   }
   return json({ data: null, meta: {}, message: "The requested customer device operation was not found." }, 404);
+}
+
+function fixtureMessageList(request: Request) {
+  const url = new URL(request.url);
+  const folder = url.searchParams.get("folder") ?? "inbox";
+  const search = (url.searchParams.get("search") ?? "").trim().toLowerCase();
+  const answer = url.searchParams.get("answer") ?? "all";
+  const priority = url.searchParams.get("priority") ?? "all";
+  const adminId = url.searchParams.get("admin_id");
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  const perPage = Math.min(100, Math.max(1, Number(url.searchParams.get("per_page") ?? 25)));
+  const filtered = fixtureMessages.filter((message) => {
+    const folderMatch = folder === "all" || message.archived === (folder === "archive");
+    const searchMatch = !search || `${message.id} ${message.full_name} ${message.email ?? ""} ${message.phone ?? ""} ${message.subject ?? ""} ${message.body ?? ""}`.toLowerCase().includes(search);
+    const answerMatch = answer === "all" || message.answered === (answer === "answered");
+    const priorityMatch = priority === "all" || message.priority === priority;
+    const assignmentMatch = adminId === null || (adminId === "0" ? !message.assignment : message.assignment?.id === Number(adminId));
+    return folderMatch && searchMatch && answerMatch && priorityMatch && assignmentMatch;
+  });
+  return json({
+    data: { items: filtered.slice((page - 1) * perPage, page * perPage), counts: { inbox: fixtureMessages.filter((item) => !item.archived).length, archive: fixtureMessages.filter((item) => item.archived).length } },
+    meta: { pagination: { current_page: page, per_page: perPage, total: filtered.length, last_page: Math.max(1, Math.ceil(filtered.length / perPage)) } },
+    message: "Messages retrieved.",
+  });
+}
+
+async function handleFixtureMessages(request: Request, path: string) {
+  if ((path === "/message_center" || path === "/message_center/ajax_message_center") && request.method === "GET") return fixtureMessageList(request);
+  if (path === "/message_center/create" && request.method === "GET") return json({ data: { staff: messageStaffFixtures, classifications: ["B General Building", "C-10 Electrical", "C-20 HVAC"] }, meta: {}, message: "Message Center options retrieved." });
+  if (path === "/message_center/customers" && request.method === "GET") {
+    const search = (new URL(request.url).searchParams.get("search") ?? "").trim().toLowerCase();
+    if (search.length < 2) return error(422, "VALIDATION_ERROR", "Enter at least two characters to search customers.");
+    const items = messageCustomerFixtures.filter((customer) => `${customer.id} ${customer.name} ${customer.email ?? ""} ${customer.phone ?? ""}`.toLowerCase().includes(search)).slice(0, 20);
+    return json({ data: { items }, meta: {}, message: "Customers retrieved." });
+  }
+  const brochureMatch = path.match(/^\/message_center\/(\d+)\/brochure$/);
+  if (brochureMatch) {
+    const id = Number(brochureMatch[1]);
+    const message = fixtureMessages.find((item) => item.id === id);
+    if (!message) return json({ data: null, meta: {}, message: "Message not found." }, 404);
+    const names = message.full_name.trim().split(/\s+/, 2);
+    const defaults: BrochureConversionInput = { first_name: names[0] ?? "", last_name: names[1] ?? "", address: "", city: "", state: "", zip: "", email: message.email ?? "", phone: message.phone ?? "", phone_extension: message.phone_extension ?? "", classification: "", ad: "Message Center", notes: message.body ?? "", receive_sms: message.receive_sms };
+    if (request.method === "GET") return json({ data: { message, defaults, classifications: ["B General Building", "C-10 Electrical", "C-20 HVAC"] }, meta: {}, message: "Brochure conversion details retrieved." });
+    if (request.method === "POST") {
+      if (message.brochure) return json({ data: null, meta: { error_code: "MESSAGE_ALREADY_CONVERTED" }, message: "This message was already converted to a brochure request." }, 409);
+      const input = await request.json() as BrochureConversionInput;
+      const brochure = { id: 8814, name: `${input.first_name} ${input.last_name}`.trim(), href: "/staff/brochures/8814" };
+      fixtureMessages = fixtureMessages.map((item) => item.id === id ? { ...item, brochure, brochure_converted_at: new Date().toISOString() } : item);
+      return json({ data: { message: fixtureMessages.find((item) => item.id === id), brochure }, meta: {}, message: "Inquiry converted to a brochure request." }, 201);
+    }
+  }
+  const archiveMatch = path.match(/^\/message_center\/(\d+)\/(archive|unarchive)$/);
+  if (archiveMatch && request.method === "POST") {
+    const id = Number(archiveMatch[1]);
+    const archived = archiveMatch[2] === "archive";
+    if (!fixtureMessages.some((item) => item.id === id)) return json({ data: null, meta: {}, message: "Message not found." }, 404);
+    fixtureMessages = fixtureMessages.map((item) => item.id === id ? { ...item, archived } : item);
+    return json({ data: fixtureMessages.find((item) => item.id === id), meta: {}, message: archived ? "Message archived." : "Message restored to the inbox." });
+  }
+  const messageMatch = path.match(/^\/message_center\/(\d+)$/);
+  if (messageMatch) {
+    const id = Number(messageMatch[1]);
+    const message = fixtureMessages.find((item) => item.id === id);
+    if (!message) return json({ data: null, meta: {}, message: "Message not found." }, 404);
+    if (request.method === "GET") return json({ data: { message, staff: messageStaffFixtures }, meta: {}, message: "Message retrieved." });
+    if (request.method === "PATCH" || request.method === "PUT") {
+      const input = await request.json() as MessageUpdateInput;
+      const assignment = input.admin_id ? messageStaffFixtures.find((staff) => staff.id === input.admin_id) ?? null : null;
+      const customer = input.customer_id ? messageCustomerFixtures.find((item) => item.id === input.customer_id) ?? null : null;
+      fixtureMessages = fixtureMessages.map((item) => item.id === id ? { ...item, full_name: input.full_name, email: input.email || null, phone: input.phone_number || null, phone_extension: input.phone_number_extension || null, body: input.message || null, answered: input.answer === "answered", priority: input.priority, assignment, customer, receive_sms: input.receive_sms } : item);
+      return json({ data: fixtureMessages.find((item) => item.id === id), meta: {}, message: "Message updated." });
+    }
+  }
+  return json({ data: null, meta: {}, message: "The requested Message Center operation was not found." }, 404);
 }
 
 function fixtureNewOrderList(request: Request) {
@@ -586,6 +663,11 @@ async function handleFixture(request: Request, path: string): Promise<Response> 
   if (path.startsWith("/customer-devices")) {
     if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
     return handleFixtureCustomerDevices(request, path);
+  }
+
+  if (path.startsWith("/message_center")) {
+    if (!readFixturePersona(request)) return error(401, "SESSION_EXPIRED", "Your session has expired. Sign in again.");
+    return handleFixtureMessages(request, path);
   }
 
   if (path.startsWith("/new_order")) {
