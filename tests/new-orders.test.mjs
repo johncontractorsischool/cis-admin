@@ -14,9 +14,11 @@ test("ships the complete legacy new-order workflow", async () => {
 
   assert.match(page, /initialPage="new-order"/);
   assert.match(navigation, /New Orders/);
-  for (const operation of ["listNewOrders", "getNewOrder", "updateNewOrder", "markNewOrderShipped", "markNewOrdersShipped"]) assert.match(workspace, new RegExp(operation));
-  for (const action of ["Export labels", "Export invoices", "Mark selected shipped"]) assert.match(workspace, new RegExp(action, "i"));
+  for (const operation of ["listNewOrders", "getNewOrder", "updateNewOrder", "markNewOrderShipped", "markNewOrdersShipped", "getNewOrderPrintDocument"]) assert.match(workspace, new RegExp(operation));
+  for (const action of ["Print labels", "Print invoices", "Mark selected shipped"]) assert.match(workspace, new RegExp(action, "i"));
   assert.match(api, /\/new_order\/shipped_selected/);
+  assert.match(api, /\/new_order\/\$\{kind\}/);
+  assert.doesNotMatch(workspace, /Promise\.all\(\[\.\.\.selected\]/);
 });
 test("keeps order data behind the server-side staff gateway", async () => {
   const [gateway, api, contract] = await Promise.all([
