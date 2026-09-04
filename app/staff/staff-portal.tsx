@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -16,6 +17,7 @@ import {
   login,
   logout,
   resendOtp,
+  STAFF_SESSION_EXPIRED_EVENT,
   StaffApiError,
   verifyOtp,
 } from "../../lib/staff-api";
@@ -120,8 +122,8 @@ function CredentialView({
   onAuthenticated: (principal: StaffPrincipal) => void;
   onOtpRequired: (challenge: OtpChallenge) => void;
 }) {
-  const [username, setUsername] = useState(fixtureMode ? "approved" : "");
-  const [password, setPassword] = useState(fixtureMode ? "staff-demo" : "");
+  const [username, setUsername] = useState(__STAFF_FIXTURE_AUTH__ && fixtureMode ? "approved" : "");
+  const [password, setPassword] = useState(__STAFF_FIXTURE_AUTH__ && fixtureMode ? "staff-demo" : "");
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(initialMessage ?? "");
@@ -186,7 +188,7 @@ function CredentialView({
         </button>
       </form>
       <p className="login-note">Access is monitored and limited to authorized staff. Session credentials are never stored in browser storage.</p>
-      {fixtureMode && fixtureScenarios.length ? (
+      {__STAFF_FIXTURE_AUTH__ && fixtureMode && fixtureScenarios.length ? (
         <div className="prototype-paths">
           <p>Local fixture paths</p>
           <div className="scenario-row">
@@ -285,7 +287,7 @@ function OtpView({
         </div>
         <div className="otp-meta">
           <span>{challenge.attemptsRemaining} attempts remaining</span>
-          {fixtureMode ? <span>Local fixture code: 2468101</span> : null}
+          {__STAFF_FIXTURE_AUTH__ && fixtureMode ? <span>Local fixture code: 2468101</span> : null}
         </div>
         <button className="primary-button" type="submit" disabled={pending || expired || challenge.attemptsRemaining <= 0}>
           <span>{pending ? "Verifying…" : "Verify and continue"}</span><span className="arrow" aria-hidden="true">→</span>
@@ -483,7 +485,7 @@ function SearchModal({ onClose, onSessionExpired }: { onClose: () => void; onSes
   );
 }
 
-function DemoDashboard({ principal }: { principal: StaffPrincipal }) {
+function FixtureDashboard({ principal }: { principal: StaffPrincipal }) {
   const firstName = principal.name.split(" ")[0];
   return (
     <div className="content-wrap">
@@ -495,6 +497,32 @@ function DemoDashboard({ principal }: { principal: StaffPrincipal }) {
       <section className="dashboard-grid">
         <article className="panel-card"><header className="panel-head"><h2>Needs your attention</h2><button className="text-button" type="button">View all tasks →</button></header><ul className="priority-list">{priorities.map((priority) => <li className="priority-item" key={priority.title}><span className="priority-icon" aria-hidden="true">{priority.glyph}</span><span className="priority-copy"><strong>{priority.title}</strong><span>{priority.detail}</span></span><span className={`status-pill ${priority.tone}`}>{priority.status}</span></li>)}</ul></article>
         <aside className="panel-card"><header className="panel-head"><h2>Recent activity</h2><button className="text-button" type="button">Audit log</button></header><ol className="activity-list">{activities.map((activity) => <li className="activity-item" key={activity.text}><span className="activity-mark" aria-hidden="true">{activity.mark}</span><span className="activity-copy"><p>{activity.text}</p><time>{activity.time}</time></span></li>)}</ol></aside>
+      </section>
+    </div>
+  );
+}
+
+function AuthenticatedHome({ principal }: { principal: StaffPrincipal }) {
+  const availableAreas = [
+    { capability: "new-orders.view", href: "/staff/new_order", label: "New Orders", detail: "Review the live fulfillment queue." },
+    { capability: "messages.view", href: "/staff/message-center", label: "Message Center", detail: "Respond to and organize customer inquiries." },
+    { capability: "students.view", href: "/staff/students", label: "Students", detail: "Find and manage student records." },
+    { capability: "customer-devices.view", href: "/staff/customer-devices", label: "Customer Devices", detail: "Review registered customer devices." },
+    { capability: "brochures.manage", href: "/staff/brochures/new", label: "Brochures", detail: "Manage brochure requests and follow-ups." },
+    { capability: "settings.manage", href: "/staff/settings", label: "Settings", detail: "Manage Staff Hub configuration." },
+  ].filter((area) => can(principal, area.capability));
+
+  return (
+    <div className="content-wrap">
+      <header className="page-heading">
+        <div><p className="eyebrow">Staff workspace</p><h1>Welcome, {principal.name.split(" ")[0]}.</h1><p>Select an available workspace to begin. Operational metrics will appear here after a verified live dashboard ships.</p></div>
+      </header>
+      <section className="dashboard-grid" aria-label="Available staff workspaces">
+        <article className="panel-card">
+          <header className="panel-head"><h2>Available workspaces</h2></header>
+          {availableAreas.length ? <ul className="priority-list">{availableAreas.map((area) => <li className="priority-item" key={area.href}><span className="priority-icon" aria-hidden="true">→</span><span className="priority-copy"><Link href={area.href}><strong>{area.label}</strong></Link><span>{area.detail}</span></span></li>)}</ul> : <p>Your account does not currently have an operational workspace assigned. Contact an administrator if you need additional access.</p>}
+        </article>
+        <aside className="panel-card"><header className="panel-head"><h2>Secure session</h2></header><p>You are signed in as {principal.email}. Access remains subject to server-side permissions for every protected operation.</p></aside>
       </section>
     </div>
   );
@@ -551,15 +579,17 @@ function DemoShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState("");
-  const visibleNavigation = useMemo(() => staffNavigation.map((group) => ({ ...group, items: group.items.filter((item) => can(principal, item.capability)) })).filter((group) => group.items.length > 0), [principal]);
+  const productionPages = useMemo(() => new Set(["Dashboard", "New Orders", "Message Center", "Students", "Customer Devices", "Brochures", "Settings"]), []);
+  const visibleNavigation = useMemo(() => staffNavigation.map((group) => ({ ...group, items: group.items.filter((item) => can(principal, item.capability) && ((__STAFF_FIXTURE_AUTH__ && fixtureMode) || productionPages.has(item.label))) })).filter((group) => group.items.length > 0), [fixtureMode, principal, productionPages]);
+  const searchAvailable = ["orders.view", "messages.view", "students.view", "brochures.manage"].some((capability) => can(principal, capability));
 
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); }
+      if (searchAvailable && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); }
     }
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, []);
+  }, [searchAvailable]);
 
   function showToast(message: string) {
     setToast(message);
@@ -582,11 +612,11 @@ function DemoShell({
         </nav>
         <div className="sidebar-foot"><Link className={`profile-button ${activePage === "Profile" ? "active" : ""}`} href="/staff/profile"><span className="avatar">{initials(principal.name)}</span><span className="profile-copy"><strong>{principal.name}</strong><span>{principal.staffType ?? "staff"}</span></span><span aria-hidden="true">···</span></Link></div>
       </aside>
-      <header className="topbar"><button className="header-icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">☰</button><button className="topbar-search" type="button" onClick={() => setSearchOpen(true)}><span aria-hidden="true">⌕</span><span>Search customers</span><kbd>⌘ K</kbd></button><div className="topbar-actions"><button className="header-icon-button" type="button" onClick={() => showToast("No new fixture updates.")} aria-label="Staff updates">◔</button><button className="header-icon-button" type="button" onClick={onLogout} aria-label="Log out" title="Log out">↪</button></div></header>
-      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? <DemoDashboard principal={principal} /> : activePage === "Students" ? initialPage === "application-detail" && recordId ? <ApplicationRecordWorkspace recordId={recordId} /> : initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? initialPage === "enrollment-new" ? principal.capabilities.includes("orders.create") ? <EnrollmentWorkspace /> : <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <NewOrderWorkspace principal={principal} /> : activePage === "Message Center" ? <MessageCenterWorkspace onSessionExpired={onSessionExpired} /> : activePage === "Order History" && initialPage === "order-detail" && recordId ? <OrderRecordWorkspace recordId={recordId} /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Settings" ? can(principal, "settings.manage") ? <SettingsWorkspace onSessionExpired={onSessionExpired} /> : <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : activePage === "Profile" ? <SettingsWorkspace profileOnly onSessionExpired={onSessionExpired} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
-      {searchOpen ? <SearchModal onClose={() => setSearchOpen(false)} onSessionExpired={onSessionExpired} /> : null}
+      <header className="topbar"><button className="header-icon-button mobile-menu-button" type="button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">☰</button>{searchAvailable ? <button className="topbar-search" type="button" onClick={() => setSearchOpen(true)}><span aria-hidden="true">⌕</span><span>Search customers</span><kbd>⌘ K</kbd></button> : <span /> }<div className="topbar-actions">{__STAFF_FIXTURE_AUTH__ && fixtureMode ? <button className="header-icon-button" type="button" onClick={() => showToast("No new fixture updates.")} aria-label="Staff updates">◔</button> : null}<button className="header-icon-button" type="button" onClick={onLogout} aria-label="Log out" title="Log out">↪</button></div></header>
+      <section className="main-content">{notice ? <div className="form-alert session-alert" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div> : null}{activePage === "Dashboard" ? __STAFF_FIXTURE_AUTH__ && fixtureMode ? <FixtureDashboard principal={principal} /> : <AuthenticatedHome principal={principal} /> : activePage === "Students" ? initialPage === "application-detail" && recordId ? <ApplicationRecordWorkspace recordId={recordId} /> : initialPage === "student-detail" && studentId ? <StudentDetails studentId={studentId} /> : initialPage === "student-new" ? <StudentCreate /> : <StudentDirectory principal={principal} /> : activePage === "Customer Devices" ? <CustomerDevicesWorkspace principal={principal} /> : activePage === "New Orders" ? initialPage === "enrollment-new" ? principal.capabilities.includes("orders.create") ? <EnrollmentWorkspace /> : <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <NewOrderWorkspace principal={principal} /> : activePage === "Message Center" ? <MessageCenterWorkspace onSessionExpired={onSessionExpired} /> : activePage === "Order History" && initialPage === "order-detail" && recordId ? <OrderRecordWorkspace recordId={recordId} /> : activePage === "Brochures" ? <BrochureWorkspace view={brochureView ?? "new"} principal={principal} brochureId={brochureId} /> : activePage === "Settings" ? can(principal, "settings.manage") ? <SettingsWorkspace onSessionExpired={onSessionExpired} /> : <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : activePage === "Profile" ? <SettingsWorkspace profileOnly onSessionExpired={onSessionExpired} /> : activePage === "Forbidden" ? <ForbiddenPage onBack={() => setActivePage("Dashboard")} /> : <ComingPage label={activePage} onBack={() => setActivePage("Dashboard")} />}</section>
+      {searchOpen && searchAvailable ? <SearchModal onClose={() => setSearchOpen(false)} onSessionExpired={onSessionExpired} /> : null}
       {toast ? <div className="toast" role="status"><span className="toast-mark" aria-hidden="true">✓</span><span>{toast}</span></div> : null}
-      {fixtureMode ? <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div> : null}
+      {__STAFF_FIXTURE_AUTH__ && fixtureMode ? <div className="prototype-bar"><label htmlFor="persona">Persona</label><select id="persona" value={principal.username} onChange={(event) => onPersonaChange(event.target.value)}>{fixturePersonas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><button className="text-button" type="button" onClick={() => setActivePage("Forbidden")}>403</button><button className="text-button" type="button" onClick={onSessionExpired}>Expire</button></div> : null}
     </main>
   );
 }
@@ -618,6 +648,18 @@ export function StaffPortal({
   const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
   const [notice, setNotice] = useState(initialSession.status === "authenticated" ? "" : initialSession.message ?? "");
 
+  const expireSession = useCallback(() => {
+    setPrincipal(null);
+    setChallenge(null);
+    setNotice("Your session has expired. Sign in again.");
+    setAuthView("credentials");
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener(STAFF_SESSION_EXPIRED_EVENT, expireSession);
+    return () => window.removeEventListener(STAFF_SESSION_EXPIRED_EVENT, expireSession);
+  }, [expireSession]);
+
   function authenticate(nextPrincipal: StaffPrincipal) {
     setPrincipal(nextPrincipal);
     setChallenge(null);
@@ -625,12 +667,12 @@ export function StaffPortal({
     setAuthView("authenticated");
   }
 
-  async function signOut(expired = false) {
+  async function signOut() {
     try {
       await logout();
       setPrincipal(null);
       setChallenge(null);
-      setNotice(expired ? "Your local fixture session was expired. Sign in again." : "You have been signed out securely.");
+      setNotice("You have been signed out securely.");
       setAuthView("credentials");
     } catch (caught) {
       if (caught instanceof StaffApiError && caught.status === 401) {
@@ -644,6 +686,7 @@ export function StaffPortal({
   }
 
   async function changeFixturePersona(persona: string) {
+    if (!__STAFF_FIXTURE_AUTH__) return;
     try {
       const result = await login(persona, "staff-demo");
       if (result.status === "authenticated") authenticate(result.principal);
@@ -658,5 +701,5 @@ export function StaffPortal({
 
   const shellKey = [initialPage, studentId, brochureView, brochureId, recordId].filter((value) => value !== undefined).join(":");
 
-  return <DemoShell key={shellKey} principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} recordId={recordId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={() => void signOut(true)} />;
+  return <DemoShell key={shellKey} principal={principal} fixturePersonas={fixturePersonas} fixtureMode={fixtureMode} initialPage={initialPage} studentId={studentId} brochureView={brochureView} brochureId={brochureId} recordId={recordId} notice={notice} onLogout={() => void signOut()} onPersonaChange={(persona) => void changeFixturePersona(persona)} onSessionExpired={expireSession} />;
 }

@@ -13,8 +13,8 @@ to the contractor-api endpoints under `/api/v2/staff`.
   never exposed to browser JavaScript or browser storage.
 - Authentication responses include `Cache-Control: no-store, max-age=0` and
   `Pragma: no-cache`.
-- Laravel validates the forwarded browser `Origin` before state-changing
-  requests and rejects unexpected origins.
+- Laravel validates the forwarded browser `Origin` before every Staff API
+  request and rejects missing or unexpected origins.
 - The gateway forwards the staff token only in the server-to-server
   `Authorization` header, plus `Origin`, `X-Forwarded-Host`,
   `X-Forwarded-Proto`, and the trusted client address.
@@ -63,8 +63,8 @@ interface ErrorResponse {
 ```
 
 Capabilities shape frontend navigation but never replace backend authorization.
-The gateway derives those navigation capabilities from contractor-api's safe
-staff profile and permissions object.
+Laravel returns the authoritative capability list in its safe staff profile;
+the gateway retains a compatibility mapping only for a rolling deployment.
 
 ## Endpoints
 

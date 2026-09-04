@@ -5,7 +5,6 @@ import {
   createFixturePrincipal,
   fixturePersonaOptions,
   fixtureScenarios,
-  isFixtureAuthEnabled,
   isPersonaKey,
 } from "./staff-fixtures";
 
@@ -41,7 +40,7 @@ export async function loadStaffSession(): Promise<{
   fixturePersonas: typeof fixturePersonaOptions;
 }> {
   const requestHeaders = await headers();
-  const fixtureMode = isFixtureAuthEnabled();
+  const fixtureMode = __STAFF_FIXTURE_AUTH__;
   if (fixtureMode) {
     const persona = fixturePersonaFromCookie(requestHeaders.get("cookie"));
     return {
