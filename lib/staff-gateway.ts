@@ -2,7 +2,6 @@ import {
   createFixturePrincipal,
   fixtureChallenge,
   fixtureLoginError,
-  isFixtureAuthEnabled,
   isPersonaKey,
 } from "./staff-fixtures";
 import { fixtureStudent, studentFixtures } from "./student-fixtures";
@@ -48,11 +47,12 @@ function error(
   code: StaffAuthErrorCode,
   message: string,
   attemptsRemaining?: number,
+  headers?: HeadersInit,
 ) {
   const body: StaffApiErrorBody = {
     error: { code, message, ...(attemptsRemaining === undefined ? {} : { attemptsRemaining }) },
   };
-  return json(body, status);
+  return json(body, status, headers);
 }
 
 function cookieValue(request: Request, name: string) {
@@ -699,15 +699,34 @@ function upstreamOrigin() {
 }
 
 function capabilityList(staff: Record<string, unknown>) {
+  const upstreamCapabilities = Array.isArray(staff.capabilities)
+    ? staff.capabilities.filter((capability): capability is string => typeof capability === "string")
+    : [];
+  if (upstreamCapabilities.length) return [...new Set(upstreamCapabilities)];
+
   const permissions = (staff.permissions ?? {}) as Record<string, unknown>;
   const type = typeof staff.type === "string" ? staff.type : "staff";
-  const capabilities = new Set(["staff.access", "dashboard.view", "students.view", "customer-devices.view", "orders.view", "messages.view", "brochures.manage"]);
+  const superadmin = type === "superadmin";
+  const generalOperations = superadmin || (!permissions.translator && !permissions.instructor && !permissions.insurance_agent);
+  const capabilities = new Set(["staff.access", "dashboard.view"]);
+  if (generalOperations || permissions.shipping_access) {
+    capabilities.add("orders.view");
+    capabilities.add("new-orders.view");
+  }
+  if (!permissions.insurance_agent && !permissions.translator) capabilities.add("messages.view");
+  if (!permissions.insurance_agent && !permissions.translator) {
+    capabilities.add("students.view");
+  }
+  if (generalOperations || permissions.instructor) {
+    capabilities.add("students.create");
+    capabilities.add("customer-devices.view");
+  }
+  if (generalOperations) capabilities.add("brochures.manage");
   if (permissions.shipping_access) capabilities.add("shipping.access");
   if (permissions.instructor) capabilities.add("instruction.access");
   if (permissions.online_courses) capabilities.add("content.manage");
   if (permissions.translator) capabilities.add("content.translate");
-  if (type === "superadmin") {
-    capabilities.add("students.create");
+  if (superadmin) {
     capabilities.add("reports.view");
     capabilities.add("settings.manage");
     capabilities.add("admin-users.manage");
@@ -715,7 +734,6 @@ function capabilityList(staff: Record<string, unknown>) {
     capabilities.add("orders.create");
   }
   if (permissions.live_pending_orders) capabilities.add("orders.create");
-  if (type === "superadmin" || permissions.shipping_access || (!permissions.translator && !permissions.instructor && !permissions.insurance_agent)) capabilities.add("new-orders.view");
   return [...capabilities];
 }
 
@@ -743,6 +761,7 @@ function normalizedErrorCode(upstreamCode: unknown, status: number): StaffAuthEr
     staff_disabled: "ACCOUNT_INACTIVE",
     outside_office_disabled: "OFFSITE_DISABLED",
     otp_invalid: "INVALID_OTP",
+    otp_expired: "CHALLENGE_EXPIRED",
     otp_attempts_exceeded: "RATE_LIMITED",
     otp_resend_cooldown: "RATE_LIMITED",
     staff_token_expired: "SESSION_EXPIRED",
@@ -760,7 +779,10 @@ function normalizedErrorCode(upstreamCode: unknown, status: number): StaffAuthEr
 async function authRequestShape(request: Request, path: string) {
   const verify = path.match(/^\/auth\/challenges\/([^/]+)\/verify$/);
   const resend = path.match(/^\/auth\/challenges\/([^/]+)\/resend$/);
-  if (!verify && !resend) return { path, body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body };
+  if (!verify && !resend) {
+    const authPath = path === "/me" ? "/auth/me" : path === "/logout" ? "/auth/logout" : path;
+    return { path: authPath, body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body };
+  }
   let body: Record<string, unknown> = {};
   if (verify) {
     try { body = (await request.json()) as Record<string, unknown>; } catch { /* validation is handled upstream */ }
@@ -773,7 +795,7 @@ async function authRequestShape(request: Request, path: string) {
 }
 
 export async function handleStaffApiRequest(request: Request, path: string) {
-  if (isFixtureAuthEnabled()) return handleFixture(request, path);
+  if (__STAFF_FIXTURE_AUTH__) return handleFixture(request, path);
 
   const base = upstreamOrigin();
   if (!base || base.origin === new URL(request.url).origin) return error(503, "AUTH_UNAVAILABLE", "The sign-in service is temporarily unavailable. Please retry.");
@@ -813,7 +835,13 @@ export async function handleStaffApiRequest(request: Request, path: string) {
   if (!upstream.ok && isSettingsPath) {
     let payload: { meta?: Record<string, unknown>; message?: string } = {};
     try { payload = await upstream.json() as typeof payload; } catch { /* normalized below */ }
-    return error(upstream.status, normalizedErrorCode(payload.meta?.error_code ?? payload.meta?.code, upstream.status), payload.message ?? "The settings service is temporarily unavailable. Please retry.");
+    return error(
+      upstream.status,
+      normalizedErrorCode(payload.meta?.error_code ?? payload.meta?.code, upstream.status),
+      payload.message ?? "The settings service is temporarily unavailable. Please retry.",
+      undefined,
+      upstream.status === 401 ? { "set-cookie": clearCookie(TOKEN_COOKIE, request) } : undefined,
+    );
   }
 
   const isAuthPath = path.startsWith("/auth/") || path === "/me" || path === "/logout";
@@ -822,16 +850,32 @@ export async function handleStaffApiRequest(request: Request, path: string) {
     responseHeaders.set("cache-control", NO_STORE_HEADERS["cache-control"]);
     responseHeaders.set("pragma", NO_STORE_HEADERS.pragma);
     for (const name of ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "set-cookie"]) responseHeaders.delete(name);
+    if (upstream.status === 401) responseHeaders.set("set-cookie", clearCookie(TOKEN_COOKIE, request));
     return new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders });
   }
 
   let payload: { data?: Record<string, unknown>; meta?: Record<string, unknown>; message?: string } = {};
   try { payload = (await upstream.json()) as typeof payload; } catch { /* normalized below */ }
 
+  if (path === "/logout" && upstream.status === 401) {
+    return new Response(null, {
+      status: 204,
+      headers: { ...NO_STORE_HEADERS, "set-cookie": clearCookie(TOKEN_COOKIE, request) },
+    });
+  }
+
   if (!upstream.ok) {
     const upstreamCode = payload.meta?.error_code ?? payload.meta?.code;
     const attempts = typeof payload.meta?.attempts_remaining === "number" ? payload.meta.attempts_remaining : undefined;
-    return error(upstream.status, normalizedErrorCode(upstreamCode, upstream.status), payload.message ?? "The sign-in service is temporarily unavailable. Please retry.", attempts);
+    return error(
+      upstream.status,
+      normalizedErrorCode(upstreamCode, upstream.status),
+      payload.message ?? "The sign-in service is temporarily unavailable. Please retry.",
+      attempts,
+      upstream.status === 401 && (path === "/me" || path === "/logout")
+        ? { "set-cookie": clearCookie(TOKEN_COOKIE, request) }
+        : undefined,
+    );
   }
 
   if (path === "/logout") return new Response(null, { status: 204, headers: { ...NO_STORE_HEADERS, "set-cookie": clearCookie(TOKEN_COOKIE, request) } });

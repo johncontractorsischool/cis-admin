@@ -19,6 +19,22 @@ export class StaffApiError extends Error {
   }
 }
 
+export const STAFF_SESSION_EXPIRED_EVENT = "cis:staff-session-expired";
+
+function publishSessionExpired(path: string, status: number) {
+  if (
+    status !== 401 ||
+    path === "/auth/login" ||
+    path.startsWith("/auth/challenges/") ||
+    path === "/logout" ||
+    typeof window === "undefined"
+  ) {
+    return;
+  }
+
+  window.dispatchEvent(new Event(STAFF_SESSION_EXPIRED_EVENT));
+}
+
 export async function staffRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -51,8 +67,19 @@ export async function staffRequest<T>(path: string, init?: RequestInit): Promise
     // A stable local fallback protects the UI from upstream HTML error pages.
   }
 
+  publishSessionExpired(path, response.status);
+
   throw new StaffApiError(
-    body?.error?.code ?? (response.status === 422 ? "VALIDATION_ERROR" : "AUTH_UNAVAILABLE"),
+    body?.error?.code ??
+      (response.status === 401
+        ? "SESSION_EXPIRED"
+        : response.status === 403
+          ? "FORBIDDEN"
+          : response.status === 429
+            ? "RATE_LIMITED"
+            : response.status === 422
+              ? "VALIDATION_ERROR"
+              : "AUTH_UNAVAILABLE"),
     body?.error?.message ??
       body?.message ??
       "The requested staff operation is temporarily unavailable. Please retry.",
