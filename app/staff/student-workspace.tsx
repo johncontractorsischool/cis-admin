@@ -7,12 +7,13 @@ import {
   createStudent,
   getStudent,
   listStudents,
-  sendStudentEmail,
+  studentProfileOptions,
   toggleStudent,
   updateStudent,
   updateStudentPassword,
   type StudentFilters,
 } from "../../lib/student-api";
+import { StudentAccessPanel, StudentApplicationTools, StudentCommunication, StudentDocuments, StudentNoteForm, syncMessage } from "./student-record-tools";
 import { StaffApiError } from "../../lib/staff-api";
 import type { StaffPrincipal } from "../../lib/staff";
 import type {
@@ -41,7 +42,7 @@ function readableError(caught: unknown) {
 }
 
 function accountLabel(student: StudentSummary) {
-  if (student.disabled || Number(student.account_status) === 0) return "Disabled";
+  if (Number(student.disabled) || Number(student.account_status) === 0) return "Disabled";
   return Number(student.account_type) === 1 ? "Full account" : "Demo account";
 }
 
@@ -132,8 +133,8 @@ export function StudentDirectory({ principal }: { principal: StaffPrincipal }) {
               <tbody>{students.map((student) => <tr key={student.customerid}>
                 <td><Link className="student-name-link" href={`/staff/students/${student.customerid}`}><span className="student-initials">{student.name[0]}{student.lname?.[0] ?? ""}</span><span><strong>{fullName(student)}</strong><small>Customer #{student.customerid}</small></span></Link></td>
                 <td><span className="table-stack"><strong>{student.email}</strong><small>{student.mobilenum || "No phone on file"}</small></span></td>
-                <td><span className="classification-chip">{student.Classification || "Not set"}</span></td>
-                <td><span className={`account-pill ${student.disabled || Number(student.account_status) === 0 ? "disabled" : Number(student.account_type) === 1 ? "full" : "demo"}`}>{accountLabel(student)}</span></td>
+                <td><span className="classification-chip">{student.classification_label || student.Classification || "Not set"}</span></td>
+                <td><span className={`account-pill ${Number(student.disabled) || Number(student.account_status) === 0 ? "disabled" : Number(student.account_type) === 1 ? "full" : "demo"}`}>{accountLabel(student)}</span></td>
                 <td><span className="table-stack"><strong>{student.extension_date ? "Through " + formatDate(student.extension_date) : "No active term"}</strong><small>{student.orderdate ? "Enrolled " + formatDate(student.orderdate) : "No order date"}</small></span></td>
                 <td><Link className="row-open" href={`/staff/students/${student.customerid}`} aria-label={`Open ${fullName(student)}`}>→</Link></td>
               </tr>)}</tbody>
@@ -155,7 +156,12 @@ const emptyInput: StudentInput = {
 };
 
 function ProfileFields({ value, onChange }: { value: StudentInput; onChange: (field: keyof StudentInput, value: string | number) => void }) {
+  const [options, setOptions] = useState<Array<{ id: number; label: string }>>([]);
+  const [firstTimes, setFirstTimes] = useState<Array<{ id: number; label: string }>>([]);
+  const [error, setError] = useState("");
+  useEffect(() => { let active = true; studentProfileOptions().then(response => { if (active) { setOptions(response.data.classifications ?? []); setFirstTimes(response.data.first_times ?? []); } }).catch(error => { if (active) setError(readableError(error)); }); return () => { active = false; }; }, []);
   return <>
+    {error && <p role="alert">Classification options unavailable: {error}</p>}
     <Field label="First name"><input required value={textValue(value.name)} onChange={(event) => onChange("name", event.target.value)} /></Field>
     <Field label="Last name"><input value={textValue(value.lname)} onChange={(event) => onChange("lname", event.target.value)} /></Field>
     <Field label="Email"><input required type="email" value={textValue(value.email)} onChange={(event) => onChange("email", event.target.value)} /></Field>
@@ -163,7 +169,8 @@ function ProfileFields({ value, onChange }: { value: StudentInput; onChange: (fi
     <Field label="Mobile phone"><input type="tel" value={textValue(value.mobilenum)} onChange={(event) => onChange("mobilenum", event.target.value)} /></Field>
     <Field label="Extension"><input value={textValue(value.mobilenum_extension)} onChange={(event) => onChange("mobilenum_extension", event.target.value)} /></Field>
     <Field label="Company"><input value={textValue(value.company_name)} onChange={(event) => onChange("company_name", event.target.value)} /></Field>
-    <Field label="Classification"><input value={textValue(value.Classification)} onChange={(event) => onChange("Classification", event.target.value.toUpperCase())} placeholder="B, C-10, A…" /></Field>
+    <Field label="Classification"><select value={textValue(value.Classification)} onChange={event => onChange("Classification", event.target.value)}><option value="">Not set</option>{value.Classification && !options.some(option => String(option.id) === String(value.Classification)) && <option value={value.Classification}>Current: {value.Classification}</option>}{options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></Field>
+    <Field label="Enrollment category"><select value={textValue(value.firsttime)} onChange={event => onChange("firsttime", event.target.value)}><option value="">Not set</option>{value.firsttime !== null && value.firsttime !== undefined && value.firsttime !== "" && !firstTimes.some(option => String(option.id) === String(value.firsttime)) && <option value={String(value.firsttime)}>Current: {value.firsttime}</option>}{firstTimes.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></Field>
     <Field label="App fee / license #"><input value={textValue(value.fee_license)} onChange={(event) => onChange("fee_license", event.target.value)} /></Field>
     <Field label="Account type"><select value={textValue(value.account_type)} onChange={(event) => onChange("account_type", Number(event.target.value))}><option value="1">Full account</option><option value="0">Demo account</option></select></Field>
     <Field label="Address" wide><input value={textValue(value.address)} onChange={(event) => onChange("address", event.target.value)} /></Field>
@@ -197,7 +204,8 @@ export function StudentCreate() {
   </div>;
 }
 
-export function StudentDetails({ studentId }: { studentId: number }) {
+export function StudentDetails({ studentId, principal }: { studentId: number; principal: StaffPrincipal }) {
+  const canManage = principal.capabilities.includes("students.create");
   const [student, setStudent] = useState<StudentDetail | null>(null);
   const [form, setForm] = useState<StudentInput>(emptyInput);
   const [tab, setTab] = useState<"profile" | "enrollments" | "activity" | "actions">("profile");
@@ -206,8 +214,7 @@ export function StudentDetails({ studentId }: { studentId: number }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [emailSubject, setEmailSubject] = useState("");
-  const [emailContent, setEmailContent] = useState("");
+  async function reload() { const response = await getStudent(studentId); setStudent(response.data); setForm(response.data); }
 
   useEffect(() => {
     let active = true;
@@ -222,8 +229,8 @@ export function StudentDetails({ studentId }: { studentId: number }) {
   function change(field: keyof StudentInput, value: string | number) { setForm((current) => ({ ...current, [field]: value })); }
   async function run(action: () => Promise<{ message: string }>, success?: string) {
     setPending(true); setError(""); setNotice("");
-    try { const response = await action(); setNotice(success ?? response.message); }
-    catch (caught) { setError(readableError(caught)); }
+    try { const response = await action(); setNotice(success ?? response.message); return true; }
+    catch (caught) { setError(readableError(caught)); return false; }
     finally { setPending(false); }
   }
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -231,7 +238,8 @@ export function StudentDetails({ studentId }: { studentId: number }) {
     await run(async () => {
       const response = await updateStudent(studentId, form);
       setStudent((current) => current ? { ...current, ...response.data } : current);
-      return response;
+      setForm(current => ({ ...current, ...response.data }));
+      return { ...response, message: [response.message, syncMessage(response.meta?.synchronization)].filter(Boolean).join(" ") };
     });
   }
 
@@ -243,13 +251,13 @@ export function StudentDetails({ studentId }: { studentId: number }) {
     <Link className="student-back" href="/staff/students">← Back to students</Link>
     <header className="student-record-header">
       <div className="student-record-identity"><span className="student-record-avatar">{student.name[0]}{student.lname?.[0] ?? ""}</span><div><div className="student-title-line"><h1>{fullName(student)}</h1><span className={`account-pill ${student.disabled ? "disabled" : "full"}`}>{accountLabel(student)}</span></div><p>{student.email} · Customer #{student.customerid}</p></div></div>
-      <div className="student-record-actions"><button className="secondary-button" type="button" disabled={pending} onClick={() => void run(() => copyStudentToPbia(studentId))}>Copy to PBIA</button><button className={`secondary-button ${student.disabled ? "success-button" : "danger-button"}`} type="button" disabled={pending} onClick={() => void run(async () => { const response = await toggleStudent(studentId); setStudent((current) => current ? { ...current, disabled: response.data.disabled } : current); return response; })}>{student.disabled ? "Enable account" : "Disable account"}</button></div>
+      {canManage && <div className="student-record-actions"><button className="secondary-button" type="button" disabled={pending} onClick={() => void run(() => copyStudentToPbia(studentId))}>Copy to PBIA</button><button className={`secondary-button ${student.disabled ? "success-button" : "danger-button"}`} type="button" disabled={pending} onClick={() => void run(async () => { const response = await toggleStudent(studentId); setStudent((current) => current ? { ...current, disabled: response.data.disabled } : current); return response; })}>{student.disabled ? "Enable account" : "Disable account"}</button></div>}
     </header>
     {notice ? <div className="student-success" role="status"><strong>Saved.</strong><span>{notice}</span></div> : null}
     {error ? <div className="student-error" role="alert"><strong>That action could not be completed.</strong><span>{error}</span></div> : null}
     <nav className="student-tabs" aria-label="Student record sections">{tabs.map((item) => <button key={item.key} className={tab === item.key ? "active" : ""} type="button" onClick={() => setTab(item.key)}>{item.label}</button>)}</nav>
 
-    {tab === "profile" ? <form className="student-detail-form" onSubmit={save}>
+    {tab === "profile" ? <form className="student-detail-form" onSubmit={save}><fieldset disabled={!canManage || pending} className="student-profile-fieldset">
       <section className="student-section-card"><header><div><h2>Personal information</h2><p>The core contact and customer details used across CIS systems.</p></div><span className="section-number">01</span></header><div className="student-form-grid"><ProfileFields value={form} onChange={change} /></div></section>
       <section className="student-section-card"><header><div><h2>Enrollment & application dates</h2><p>Dates shown on the legacy student detail page.</p></div><span className="section-number">02</span></header><div className="student-form-grid">
         <Field label="Extension date"><input type="date" value={textValue(form.extension_date).slice(0, 10)} onChange={(event) => change("extension_date", event.target.value)} /></Field>
@@ -258,28 +266,31 @@ export function StudentDetails({ studentId }: { studentId: number }) {
         <Field label="iApplication expiration"><input type="date" value={textValue(form.app_review_expiration_date).slice(0, 10)} onChange={(event) => change("app_review_expiration_date", event.target.value)} /></Field>
         <Field label="Law test date"><input type="date" value={textValue(form.test_date_law).slice(0, 10)} onChange={(event) => change("test_date_law", event.target.value)} /></Field>
         <Field label="Trade test date"><input type="date" value={textValue(form.test_date_trade).slice(0, 10)} onChange={(event) => change("test_date_trade", event.target.value)} /></Field>
+        <Field label="iApplication access"><select value={Number(form.iapp_access ?? 0)} onChange={event => change("iapp_access", Number(event.target.value))}><option value="0">No access</option><option value="1">Standard</option><option value="2">Premium</option></select></Field>
+        <Field label="Spanish access"><select value={Number(form.es_access ?? 0)} onChange={event => change("es_access", Number(event.target.value))}><option value="0">Disabled</option><option value="1">Enabled</option></select></Field>
         <Field label="Internal notes" wide><textarea rows={4} value={textValue(form.Notes)} onChange={(event) => change("Notes", event.target.value)} /></Field>
       </div></section>
       <section className="student-section-card"><header><div><h2>Corporation information</h2><p>Linked company record from the legacy corporation workflow.</p></div><span className="section-number">03</span></header>{student.corporation ? <dl className="student-definition-grid">{Object.entries(student.corporation).filter(([, value]) => value !== null && value !== "").slice(0, 10).map(([key, value]) => <div key={key}><dt>{key.replaceAll("_", " ")}</dt><dd>{textValue(value)}</dd></div>)}</dl> : <div className="student-empty compact"><strong>No corporation linked.</strong><span>Corporation information will appear when a company record is attached.</span></div>}</section>
-      <div className="student-sticky-actions"><span>{pending ? "Saving changes…" : "Changes are sent to contractor-api."}</span><button className="primary-button" type="submit" disabled={pending}>Save student</button></div>
+      <div className="student-sticky-actions"><span>{!canManage ? "Read-only student access." : pending ? "Saving changes…" : "Changes are sent to contractor-api."}</span><button className="primary-button" type="submit" disabled={pending || !canManage}>Save student</button></div></fieldset>
     </form> : null}
 
     {tab === "enrollments" ? <div className="student-section-stack">
-      <section className="student-section-card"><header><div><h2>Online courses</h2><p>Course access and expiration records.</p></div><span className="record-count">{student.online_courses.length}</span></header><RecordTable rows={student.online_courses} empty="No online courses" /></section>
-      <section className="student-section-card"><header><div><h2>Live classes</h2><p>Current and historical live class access.</p></div><span className="record-count">{student.live_classes.length}</span></header><RecordTable rows={student.live_classes} empty="No live classes" /></section>
-      <section className="student-section-card"><header><div><h2>Class schedule</h2><p>Law and trade dates managed by staff.</p></div><span className="record-count">{student.class_managements.length}</span></header><RecordTable rows={student.class_managements} empty="No scheduled classes" /></section>
-      <section className="student-section-card"><header><div><h2>Subscribed tests</h2><p>Practice-test access and expiration.</p></div><span className="record-count">{student.subscribed_tests.length}</span></header><RecordTable rows={student.subscribed_tests} empty="No subscribed tests" /></section>
+      <StudentAccessPanel studentId={studentId} kind="online_courses" title="Online courses" rows={student.online_courses} canManage={canManage} onChanged={reload} />
+      <StudentAccessPanel studentId={studentId} kind="live_classes" title="Live classes" rows={student.live_classes} canManage={canManage} onChanged={reload} />
+      <StudentAccessPanel studentId={studentId} kind="class_managements" title="Class schedule" rows={student.class_managements} canManage={canManage} onChanged={reload} />
+      <StudentAccessPanel studentId={studentId} kind="subscribed_tests" title="Subscribed tests" rows={student.subscribed_tests} canManage={canManage} onChanged={reload} />
     </div> : null}
 
     {tab === "activity" ? <div className="student-section-stack">
-      <section className="student-section-card"><header><div><h2>Documents</h2><p>Student files and application descriptions.</p></div><span className="record-count">{student.documents.length}</span></header><RecordTable rows={student.documents} empty="No student documents" /></section>
-      <section className="student-section-card"><header><div><h2>Customer notes</h2><p>Notes for the current and previous email address.</p></div><span className="record-count">{student.notes.length}</span></header><RecordTable rows={student.notes} empty="No customer notes" /></section>
+      <StudentDocuments studentId={studentId} documents={student.documents} canManage={canManage} onChanged={reload} />
+      <section className="student-section-card"><header><div><h2>Customer notes</h2><p>Notes for the current and previous email address.</p></div><span className="record-count">{student.notes.length}</span></header><RecordTable rows={student.notes} empty="No customer notes" />{canManage && <StudentNoteForm studentId={studentId} onChanged={reload} />}</section>
+      <StudentCommunication studentId={studentId} canManage={canManage} />
     </div> : null}
 
     {tab === "actions" ? <div className="student-action-grid">
-      <section className="student-section-card"><header><div><h2>Reset password</h2><p>Set a temporary student password. The API hashes it before storage.</p></div></header><form className="stack-form" onSubmit={(event) => { event.preventDefault(); void run(() => updateStudentPassword(studentId, newPassword), "Student password updated.").then(() => setNewPassword("")); }}><Field label="New password"><input type="password" required minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></Field><button className="primary-button" type="submit" disabled={pending || newPassword.length < 8}>Update password</button></form></section>
-      <section className="student-section-card"><header><div><h2>Send email</h2><p>Send a staff message and retain it in the student email history.</p></div></header><form className="stack-form" onSubmit={(event) => { event.preventDefault(); void run(() => sendStudentEmail(studentId, emailSubject, emailContent), "Student email queued.").then(() => { setEmailSubject(""); setEmailContent(""); }); }}><Field label="Subject"><input required value={emailSubject} onChange={(event) => setEmailSubject(event.target.value)} /></Field><Field label="Message"><textarea required rows={6} value={emailContent} onChange={(event) => setEmailContent(event.target.value)} /></Field><button className="primary-button" type="submit" disabled={pending}>Send email</button></form></section>
-      <section className="student-section-card action-summary-card"><header><div><h2>Application access</h2><p>Current integration status for this customer.</p></div></header><dl className="student-definition-grid"><div><dt>iApplication access</dt><dd>{textValue(student.iapp_access) || "0"}</dd></div><div><dt>Apps account</dt><dd>{student.apps_account_created ? "Created" : "Not created"}</dd></div><div><dt>Prescreen choice</dt><dd>{student.prescreen_choice?.replaceAll("_", " ") || "Not selected"}</dd></div><div><dt>Spanish access</dt><dd>{Number(student.es_access) ? "Enabled" : "Not enabled"}</dd></div></dl><button className="secondary-button" type="button" disabled={pending} onClick={() => void run(() => copyStudentToPbia(studentId))}>Queue PBIA copy</button></section>
+      <section className="student-section-card"><fieldset disabled={!canManage || pending} className="student-profile-fieldset"><header><div><h2>Reset password</h2><p>Set a temporary student password. The API hashes it before storage.</p></div></header><form className="stack-form" onSubmit={(event) => { event.preventDefault(); void run(() => updateStudentPassword(studentId, newPassword), "Student password updated.").then(saved => { if (saved) setNewPassword(""); }); }}><Field label="New password"><input type="password" required minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></Field><button className="primary-button" type="submit" disabled={pending || newPassword.length < 8}>Update password</button></form></fieldset></section>
+      <StudentCommunication studentId={studentId} canManage={canManage} />
+      <section className="student-section-card action-summary-card"><header><div><h2>Application access</h2><p>Current integration status for this customer.</p></div></header><dl className="student-definition-grid"><div><dt>iApplication access</dt><dd>{textValue(student.iapp_access) || "0"}</dd></div><div><dt>Apps account</dt><dd>{Number(student.apps_account_created) ? "Created" : "Not created"}</dd></div><div><dt>Prescreen choice</dt><dd>{student.prescreen_choice?.replaceAll("_", " ") || "Not selected"}</dd></div><div><dt>Spanish access</dt><dd>{Number(student.es_access) ? "Enabled" : "Not enabled"}</dd></div></dl><StudentApplicationTools studentId={studentId} canManage={canManage} onChanged={reload} prescreenChoice={student.prescreen_choice} /></section>
     </div> : null}
   </div>;
 }

@@ -135,7 +135,7 @@ export const studentFixtures: StudentDetail[] = baseStudents.map((student, index
   iapp_access: index === 0 ? 2 : index === 2 ? 0 : 1,
   prescreen_choice: index === 0 ? "ORIGINAL_LICENSE" : null,
   apps_account_created: index === 0,
-  documents: index === 0 ? [{ id: 71, description: "Signed enrollment agreement", date: "2026-07-18", admin_name: "AE" }] : [],
+  documents: index === 0 ? [{ id: 71, kind: "attachment", name: "enrollment.pdf", description: "Signed enrollment agreement", date: "2026-07-18", admin: "AE" }] : [],
   online_courses: index === 0 ? [{ id: 912, clas_id: 1, end_enroll: "2027-07-18", status: 1 }] : [],
   live_classes: index === 0 ? [{ id: 205, live_class_category_id: 4, end_enroll: "2026-10-31", status: 1 }] : [],
   class_managements: index === 0 ? [{ id: 340, sem_location: "Sacramento", law_date: "2026-09-08", trade_date: "2026-09-10", confirmed: 1, initials: "AE" }] : [],

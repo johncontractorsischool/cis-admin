@@ -35,7 +35,7 @@ function publishSessionExpired(path: string, status: number) {
   window.dispatchEvent(new Event(STAFF_SESSION_EXPIRED_EVENT));
 }
 
-export async function staffRequest<T>(path: string, init?: RequestInit): Promise<T> {
+export async function staffResponse(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(`/api/v1/staff${path}`, {
@@ -43,24 +43,21 @@ export async function staffRequest<T>(path: string, init?: RequestInit): Promise
       credentials: "include",
       headers: {
         accept: "application/json",
-        ...(init?.body ? { "content-type": "application/json" } : {}),
+        ...(typeof init?.body === "string" ? { "content-type": "application/json" } : {}),
         ...init?.headers,
       },
     });
   } catch {
     throw new StaffApiError(
       "AUTH_UNAVAILABLE",
-      "The sign-in service is temporarily unavailable. Please retry.",
+      "The staff service is temporarily unavailable. Please retry.",
       503,
     );
   }
 
-  if (response.ok) {
-    if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
-  }
+  if (response.ok) return response;
 
-  let body: (StaffApiErrorBody & { message?: string }) | null = null;
+  let body: (StaffApiErrorBody & { message?: string; errors?: Record<string, unknown> }) | null = null;
   try {
     body = (await response.json()) as StaffApiErrorBody;
   } catch {
@@ -68,6 +65,9 @@ export async function staffRequest<T>(path: string, init?: RequestInit): Promise
   }
 
   publishSessionExpired(path, response.status);
+  const validationMessage = response.status === 422 && body?.errors
+    ? Object.values(body.errors).flat().filter((value): value is string => typeof value === "string").slice(0, 3).join(" ")
+    : "";
 
   throw new StaffApiError(
     body?.error?.code ??
@@ -81,11 +81,17 @@ export async function staffRequest<T>(path: string, init?: RequestInit): Promise
               ? "VALIDATION_ERROR"
               : "AUTH_UNAVAILABLE"),
     body?.error?.message ??
-      body?.message ??
+      (validationMessage || body?.message) ??
       "The requested staff operation is temporarily unavailable. Please retry.",
     response.status,
-    body?.error.attemptsRemaining,
+    body?.error?.attemptsRemaining,
   );
+}
+
+export async function staffRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await staffResponse(path, init);
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
 }
 
 export function login(username: string, password: string) {
