@@ -23,7 +23,7 @@ test("ships real student list, create, and detail routes", async () => {
     "toggleStudent",
     "copyStudentToPbia",
     "updateStudentPassword",
-    "sendStudentEmail",
+    "StudentCommunication",
   ]) assert.match(workspace, new RegExp(operation));
 });
 

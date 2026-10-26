@@ -1,5 +1,25 @@
 export type StudentRecordValue = string | number | boolean | null;
 
+export type StudentAccessKind = "online_courses" | "live_classes" | "subscribed_tests" | "class_managements";
+export type StudentAccessOptions = Record<StudentAccessKind, Array<{ id: number; label: string }>>;
+export type StudentSyncResults = Record<string, { status: "succeeded" | "failed" | "disabled" | "unconfigured" | "not_applicable" }>;
+export interface StudentDocument {
+  id: number;
+  kind: "attachment" | "application";
+  name: string;
+  description: string;
+  date?: string | null;
+  admin?: string | null;
+}
+export interface StudentEmailRecord {
+  id: number;
+  subject: string;
+  content: string;
+  delivery_status: string;
+  admin: string;
+  created_at: string;
+}
+
 export interface StudentSummary {
   customerid: number;
   name: string;
@@ -7,6 +27,7 @@ export interface StudentSummary {
   email: string;
   mobilenum: string | null;
   Classification: string | null;
+  classification_label?: string | null;
   account_type: number | string | null;
   account_status: number | string | null;
   disabled: boolean | number | null;
@@ -36,7 +57,7 @@ export interface StudentDetail extends StudentSummary {
   iapp_access: number | string | null;
   prescreen_choice: string | null;
   apps_account_created: boolean | number | null;
-  documents: Array<Record<string, StudentRecordValue>>;
+  documents: StudentDocument[];
   online_courses: Array<Record<string, StudentRecordValue>>;
   live_classes: Array<Record<string, StudentRecordValue>>;
   class_managements: Array<Record<string, StudentRecordValue>>;
